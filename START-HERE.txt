@@ -1,0 +1,19 @@
+Cydia for iOS 15+ Rootless - Public Release
+Version: 1.1.49+rootless.3
+Architecture: iphoneos-arm64
+Rootless prefix: /var/jb
+
+Place Cydia_Rootless_GitHub_1.1.49+rootless.3_FINAL.zip in /var/mobile/Documents and run:
+
+cd /var/mobile/Documents && rm -rf Cydia_Rootless && unzip Cydia_Rootless_GitHub_1.1.49+rootless.3_FINAL.zip && cd Cydia_Rootless && ./run-build.sh
+
+README.md contains the public project overview and build requirements.
+RELEASE_NOTES.md contains the release changelog.
+GITHUB-RELEASE.md contains a ready-to-paste GitHub Release description.
+The build performs version, architecture, rootless-payload and permission verification before installation.
+Build dependency for the embedded APT HTTP method: libgnutls30-dev
+If preflight reports it missing: sudo apt-get install libgnutls30-dev
+The runtime installer automatically resolves Procursus xz-utils before installing Cydia.
+
+Persistent diagnostics:
+/var/mobile/Documents/Cydia_Rootless_Diagnostics.log

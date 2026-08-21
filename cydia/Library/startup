@@ -1,0 +1,23 @@
+#!/var/jb/bin/bash
+
+export PATH=/var/jb/usr/sbin:/var/jb/usr/bin:/var/jb/sbin:/var/jb/bin:$PATH:/usr/sbin:/usr/bin:/sbin:/bin
+
+if [[ ! -e /var/jb/var/lib/cydia/firmware.ver ]]; then
+    cache=
+fi
+
+/var/jb/usr/libexec/cydia/firmware.sh
+
+debs=(/var/root/Media/Cydia/AutoInstall/*.deb)
+if [[ ${#debs[@]} -ne 0 && -f ${debs[0]} ]]; then
+    dpkg -i "${debs[@]}" 2>/tmp/dpkg.log 1>&2
+    rm -f "${debs[@]}"
+    cache=
+
+    killall -9 Lowtide AppleTV
+fi
+
+if [[ ${cache+@} ]]; then
+    sbdidlaunch
+    su -c uicache mobile
+fi

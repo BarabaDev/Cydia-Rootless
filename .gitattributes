@@ -1,0 +1,10 @@
+* text=auto eol=lf
+*.png binary
+*.gpg binary
+*.sh text eol=lf
+*.mm text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+*.plist text eol=lf
+*.xml text eol=lf

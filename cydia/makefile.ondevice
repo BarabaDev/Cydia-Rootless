@@ -1,0 +1,381 @@
+.DELETE_ON_ERROR:
+.SECONDARY:
+
+# Rootless Procursus does not provide /bin/sh. GNU make otherwise defaults
+# to /bin/sh for $(shell ...) and recipe execution, so select the bootstrap
+# shell explicitly before any $(shell ...) expansion happens.
+SHELL := /var/jb/bin/bash
+export PATH := /var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/sbin:$(PATH)
+
+dpkg := fakeroot dpkg-deb -Zxz
+version := $(shell ./version.sh)
+
+flag := 
+plus :=
+link := 
+libs := 
+lapt := 
+
+kind := iphoneos
+arch := arm64
+rootless_prefix := /var/jb
+
+# NewTerm/on-device toolchain: no xcrun and no xcodebuild.
+sdk ?= $(SDKROOT)
+
+# Do not discover clang++ through $(shell command -v ...): on rootless that
+# discovery itself depends on make already having a valid shell. Use the
+# canonical Procursus path verified by prepare-ondevice.sh.
+cycc := /var/jb/usr/bin/clang++
+
+ifeq ($(wildcard $(cycc)),)
+$(error clang++ not found at $(cycc); run ./prepare-ondevice.sh)
+endif
+ifeq ($(strip $(sdk)),)
+$(error SDKROOT is empty; run ./build-ondevice.sh so the on-device build can detect the SDK)
+endif
+
+cycc += -isysroot $(sdk)
+cycc += -F$(sdk)/System/Library/Frameworks
+cycc += -F$(sdk)/System/Library/PrivateFrameworks
+
+cycc += -include system.h
+
+# The exact original apt64 pin provides apt-pkg/missing.h and
+# apt-pkg/memrchr.cc itself. Do NOT force-include the legacy fallback here:
+# its memrchr macro would rewrite the pinned APT declaration and make modern
+# Clang see two cydia_memrchr declarations differing only by return type.
+# Compat/memrchr.h is retained only as historical fallback/reference.
+
+cycc += -fmessage-length=0
+cycc += -g -O2
+cycc += -fvisibility=hidden
+
+link += -Wl,-dead_strip
+link += -Wl,-no_dead_strip_inits_and_terms
+
+iapt :=
+iapt += -Iapt64
+iapt += -Iapt64/methods
+iapt += -Iapt64-contrib
+iapt += -Iapt64-deb
+iapt += -Iapt-extra
+iapt += -IObjects/apt64
+
+flag += $(iapt)
+flag += -I.
+flag += -ICompat
+flag += -I$(rootless_prefix)/usr/include
+
+flag += -Wall
+flag += -Wno-dangling-else
+flag += -Wno-deprecated-declarations
+flag += -Wno-objc-protocol-method-implementation
+flag += -Wno-logical-op-parentheses
+flag += -Wno-shift-op-parentheses
+flag += -Wno-unknown-pragmas
+flag += -Wno-unknown-warning-option
+
+plus += -fobjc-call-cxx-cdtors
+plus += -fvisibility-inlines-hidden
+
+link += -multiply_defined suppress
+
+libs += -framework CoreFoundation
+libs += -framework CoreGraphics
+libs += -framework Foundation
+# No direct GraphicsServices symbols are linked; legacy capability lookup uses dlsym.
+libs += -framework IOKit
+libs += -framework QuartzCore
+# SpringBoardServices is a private framework and is absent from the public
+# iPhoneOS SDK. Link against a minimal text-based stub containing only the ABI
+# symbols original Cydia imports. The stub install-name still points at the real
+# system private framework at runtime; no Cydia call sites are changed.
+libs += Compat/Frameworks/SpringBoardServices.tbd
+libs += -framework SystemConfiguration
+
+libs += -framework CFNetwork
+
+libs += -llockdown
+# WebCore is a private framework omitted from the public iPhoneOS SDK.
+# Original Cydia directly imports only WebThreadLock/WebThreadUnlock from it;
+# link against a minimal ABI stub while keeping the real private framework
+# install-name for runtime resolution. No WebThreadLocked call sites are changed.
+libs += Compat/Frameworks/WebCore.tbd
+libs += -framework WebKit
+
+libs += -Wl,-force_load,Objects/libapt64.a
+lapt += Objects/libapt64.a
+
+libs += -licucore
+libs += -lgnutls
+
+uikit := 
+uikit += -framework UIKit
+
+dirs := Menes CyteKit Cydia SDURLCache
+
+code := $(foreach dir,$(dirs),$(wildcard $(foreach ext,h hpp c cpp m mm,$(dir)/*.$(ext))))
+code := $(filter-out SDURLCache/SDURLCacheTests.m,$(code))
+code += MobileCydia.mm Version.mm iPhonePrivate.h Cytore.hpp lookup3.c Sources.h Sources.mm DiskUsage.cpp
+
+code += http.cc
+
+source := $(filter %.m,$(code)) $(filter %.mm,$(code))
+source += $(filter %.c,$(code)) $(filter %.cpp,$(code)) $(filter %.cc,$(code))
+header := $(filter %.h,$(code)) $(filter %.hpp,$(code)) $(filter %.hh,$(code))
+
+object := $(source)
+object := $(object:.c=.o)
+object := $(object:.cpp=.o)
+object := $(object:.cc=.o)
+object := $(object:.m=.o)
+object := $(object:.mm=.o)
+object := $(object:%=Objects/%)
+
+methods := copy file rred gpgv
+
+libapt32 := 
+libapt32 += $(wildcard apt32/apt-pkg/*.cc)
+libapt32 += $(wildcard apt32/apt-pkg/deb/*.cc)
+libapt32 += $(wildcard apt32/apt-pkg/contrib/*.cc)
+libapt32 += apt32/methods/gzip.cc
+libapt32 += $(patsubst %,apt32/methods/%.cc,$(methods))
+libapt32 := $(patsubst %.cc,Objects/%.o,$(libapt32))
+
+libapt64 := 
+libapt64 += $(wildcard apt64/apt-pkg/*.cc)
+libapt64 += $(wildcard apt64/apt-pkg/deb/*.cc)
+libapt64 += $(wildcard apt64/apt-pkg/contrib/*.cc)
+libapt64 += apt64/apt-pkg/tagfile-keys.cc
+libapt64 += apt64/methods/store.cc
+# Pinned apt64 HTTP is a multi-source method. Bingner's own iOS
+# target builds http.cc together with basehttp.cc, connect.cc and
+# rfc2553emu.cc. http.cc itself remains a top-level Cydia object so its
+# main() is renamed to main_http(); these three companion units provide
+# BaseHttpMethod and connection helper definitions required by that object.
+libapt64 += apt64/methods/basehttp.cc
+libapt64 += apt64/methods/connect.cc
+libapt64 += apt64/methods/rfc2553emu.cc
+libapt64 += $(patsubst %,apt64/methods/%.cc,$(methods))
+libapt64 := $(filter-out %/srvrec.cc,$(libapt64))
+libapt64 := $(patsubst %.cc,Objects/%.o,$(libapt64))
+
+link += -liconv
+link += -lz
+link += -L$(rootless_prefix)/usr/lib
+link += -L$(rootless_prefix)/lib
+# Procursus libraries such as libgnutls use an @rpath install name. The
+# application is launched directly by SpringBoard, so DYLD_LIBRARY_PATH from a
+# terminal is unavailable; embed the rootless library directory in Mach-O.
+link += -Wl,-rpath,$(rootless_prefix)/usr/lib
+
+flag += -DAPT_PKG_EXPOSE_STRING_VIEW
+flag += -Dsighandler_t=sig_t
+
+flag64 := 
+flag64 += -arch $(arch)
+flag64 += -miphoneos-version-min=15.0
+
+apt64 := $(cycc) $(flag64) $(flag)
+apt64 += -include apt.h
+apt64 += -Wno-deprecated-register
+apt64 += -Wno-unused-private-field
+apt64 += -Wno-unused-variable
+apt64 += -DNDEBUG
+
+eapt := -include apt.h
+apt64 += $(eapt)
+eapt += -D'VERSION="0.7.25.3"'
+eapt += -Wno-format
+eapt += -Wno-logical-op-parentheses
+iapt += $(eapt)
+
+cycc += $(flag64)
+
+plus += -std=c++11
+
+images := $(shell find MobileCydia.app/ -type f -name '*.png')
+images := $(images:%=Images/%)
+
+lproj_deb := debs/cydia-lproj_$(version)_iphoneos-arm64.deb
+
+all: MobileCydia
+
+clean:
+	rm -f MobileCydia postinst cydo setnsfpn cfversion
+	rm -rf Objects/ Images/
+
+Objects/apt64/apt-pkg/tagfile.o: Objects/apt64/apt-pkg/tagfile-keys.h
+Objects/apt64/apt-pkg/tagfile-keys.o: Objects/apt64/apt-pkg/tagfile-keys.h
+Objects/apt64/apt-pkg/deb/deblistparser.o: Objects/apt64/apt-pkg/tagfile-keys.h
+
+Objects/apt64/apt-pkg/tagfile-keys%h apt64/apt-pkg/tagfile-keys%cc:
+	mkdir -p apt64
+	mkdir -p Objects/apt64/apt-pkg
+	cd apt64 && perl ../apt64/triehash/triehash.pl \
+            --ignore-case \
+            --header ../Objects/apt64/apt-pkg/tagfile-keys.h \
+            --code apt-pkg/tagfile-keys.cc \
+            --enum-class \
+            --enum-name pkgTagSection::Key \
+            --function-name pkgTagHash \
+            --include "<apt-pkg/tagfile.h>" \
+            ../apt64/apt-pkg/tagfile-keys.list
+	sed -i -e 's@typedef char static_assert64@//\\0@' apt64/apt-pkg/tagfile-keys.cc
+
+Objects/apt64/%.o: apt64/%.cc $(header) apt.h apt-extra/*.h
+	@mkdir -p $(dir $@)
+	@echo "[cycc] $<"
+	@$(apt64) $(plus) -c -o $@ $< -Dmain=main_$(basename $(notdir $@))
+
+# Bingner's embedded HTTP method defines its own global Machine_,
+# while original Cydia defines CyteKit's Machine_ in extern.mm. When both
+# objects are linked into one executable those globals collide. Keep Cydia's
+# public/global Machine_ untouched and rename only the HTTP translation unit's
+# private device-machine variable at preprocessing time. Every definition and
+# use inside http.cc is renamed consistently, so HTTP behavior is unchanged.
+Objects/http.o: flag += -DMachine_=APTHTTPMachine_
+
+Objects/%.o: %.cc $(header)
+	@mkdir -p $(dir $@)
+	@echo "[cycc] $<"
+	@$(cycc) $(plus) -c -o $@ $< $(flag) -Wno-format -include apt.h -Dmain=main_$(basename $(notdir $@))
+
+Objects/%.o: %.c $(header)
+	@mkdir -p $(dir $@)
+	@echo "[cycc] $<"
+	@$(cycc) -c -o $@ -x c $< $(flag)
+
+Objects/%.o: %.m $(header)
+	@mkdir -p $(dir $@)
+	@echo "[cycc] $<"
+	@$(cycc) -c -o $@ $< $(flag)
+
+Objects/%.o: %.cpp $(header)
+	@mkdir -p $(dir $@)
+	@echo "[cycc] $<"
+	@$(cycc) $(plus) -c -o $@ $< $(flag)
+
+Objects/%.o: %.mm $(header)
+	@mkdir -p $(dir $@)
+	@echo "[cycc] $<"
+	@$(cycc) $(plus) -c -o $@ $< $(flag)
+
+Objects/Version.o: Version.h
+
+Images/%.png: %.png
+	@mkdir -p $(dir $@)
+	@echo "[pngc] $<"
+	@./pngcrush.sh $< $@
+	@touch $@
+
+Objects/libapt32.a: $(libapt32)
+	@echo "[arch] $@"
+	@ar -rc $@ $^
+
+Objects/libapt64.a: $(libapt64)
+	@echo "[arch] $@"
+	@ar -rc $@ $^
+
+MobileCydia: $(object) entitlements.xml $(lapt)
+	@echo "[link] $@"
+	@$(cycc) -o $@ $(filter %.o,$^) $(link) $(libs) $(uikit)
+	@mkdir -p bins
+	@cp -a $@ bins/$@-$(version)_$(shell date +%s)
+	@echo "[strp] $@"
+	@grep '~' <<<"$(version)" >/dev/null && echo "skipping..." || strip $@
+	@echo "[uikt] $@"
+	@./uikit.sh $@
+	@install_name_tool -add_rpath /System/Library/Frameworks $@
+	@install_name_tool -add_rpath /System/Library/PrivateFrameworks $@
+	@install_name_tool -change /System/Library/Frameworks/WebKit.framework/WebKit @rpath/WebKit.framework/WebKit $@
+	@install_name_tool -change /System/Library/PrivateFrameworks/WebKit.framework/WebKit @rpath/WebKit.framework/WebKit $@
+
+cfversion: cfversion.mm
+	$(cycc) -o $@ $(filter %.mm,$^) $(flag) $(link) -framework CoreFoundation
+	@ldid -T0 -Sgenent.xml $@
+
+setnsfpn: setnsfpn.cpp
+	$(cycc) -o $@ $(filter %.cpp,$^) $(flag) $(link)
+	@ldid -T0 -Sgenent.xml $@
+
+cydo: cydo.cpp
+	$(cycc) $(plus) -o $@ $(filter %.cpp,$^) $(flag) $(link) -Wno-deprecated-writable-strings
+	@ldid -T0 -Sgenent.xml $@
+
+postinst: postinst.mm CyteKit/stringWith.mm CyteKit/stringWith.h CyteKit/UCPlatform.h
+	$(cycc) $(plus) -o $@ $(filter %.mm,$^) $(flag) $(link) -framework CoreFoundation -framework Foundation -framework UIKit
+	@ldid -T0 -Sgenent.xml $@
+
+debs/cydia_$(version)_iphoneos-arm64.deb: MobileCydia preinst postinst cfversion setnsfpn cydo $(images) $(shell find MobileCydia.app) cydia.control Library/firmware.sh Library/move.sh Library/startup
+	fakeroot rm -rf _
+	mkdir -p _/var/jb/var/lib/cydia
+	
+	mkdir -p _/var/jb/etc/apt
+	mkdir -p _/var/jb/etc/apt/apt.conf.d
+	mkdir -p _/var/jb/etc/apt/sources.list.d
+	cp -a Trusted.gpg _/var/jb/etc/apt/trusted.gpg.d
+	
+	mkdir -p _/var/jb/usr/libexec
+	cp -a Library _/var/jb/usr/libexec/cydia
+	cp -a "$$(command -v du)" _/var/jb/usr/libexec/cydia/du
+	cp -a cfversion _/var/jb/usr/libexec/cydia
+	cp -a setnsfpn _/var/jb/usr/libexec/cydia
+	
+	cp -a cydo _/var/jb/usr/libexec/cydia
+	
+	mkdir -p _/var/jb/Library
+	cp -a LaunchDaemons _/var/jb/Library/LaunchDaemons
+	
+	mkdir -p _/var/jb/Applications
+	cp -a MobileCydia.app _/var/jb/Applications/Cydia.app
+	rm -rf _/var/jb/Applications/Cydia.app/*.lproj
+	cp -a MobileCydia _/var/jb/Applications/Cydia.app/Cydia
+	
+	for meth in bzip2 gzip lzma http https store $(methods); do ln -s Cydia _/var/jb/Applications/Cydia.app/"$${meth}"; done
+	
+	cd MobileCydia.app && find . -name '*.png' -exec cp -af ../Images/MobileCydia.app/{} ../_/var/jb/Applications/Cydia.app/{} ';'
+	@echo "[sign] Cydia.app"
+	@ldid -T0 -Sentitlements.xml _/var/jb/Applications/Cydia.app/Cydia
+	
+	mkdir -p _/var/jb/Applications/Cydia.app/Sources
+	ln -s /var/jb/usr/share/bigboss/icons/bigboss.png _/var/jb/Applications/Cydia.app/Sources/apt.bigboss.us.com.png
+	ln -s /var/jb/usr/share/bigboss/icons/planetiphones.png _/var/jb/Applications/Cydia.app/Sections/"Planet-iPhones Mods.png"
+	
+	mkdir -p _/DEBIAN
+	./control.sh cydia.control _ >_/DEBIAN/control
+	cp -a preinst postinst triggers _/DEBIAN/
+	chmod 0755 _/DEBIAN/preinst _/DEBIAN/postinst
+	chmod 0644 _/DEBIAN/triggers
+	
+	
+	fakeroot chown -R 0 _
+	fakeroot chgrp -R 0 _
+	fakeroot chmod 6755 _/var/jb/usr/libexec/cydia/cydo
+	
+	mkdir -p debs
+	ln -sf debs/cydia_$(version)_iphoneos-arm64.deb Cydia.deb
+	$(dpkg) -b _ Cydia.deb
+	@ls -lh Cydia.deb
+
+$(lproj_deb): $(shell find MobileCydia.app -name '*.strings') cydia-lproj.control
+	fakeroot rm -rf __
+	mkdir -p __/var/jb/Applications/Cydia.app
+	
+	cp -a MobileCydia.app/*.lproj __/var/jb/Applications/Cydia.app
+	
+	mkdir -p __/DEBIAN
+	./control.sh cydia-lproj.control __ >__/DEBIAN/control
+	
+	fakeroot chown -R 0 __
+	fakeroot chgrp -R 0 __
+	
+	mkdir -p debs
+	ln -sf debs/cydia-lproj_$(version)_iphoneos-arm64.deb Cydia_.deb
+	$(dpkg) -b __ Cydia_.deb
+	@ls -lh Cydia_.deb
+	
+package: debs/cydia_$(version)_iphoneos-arm64.deb $(lproj_deb)
+
+.PHONY: all clean package
