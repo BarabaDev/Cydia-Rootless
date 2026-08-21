@@ -26,11 +26,13 @@ This project preserves the original Cydia interface and behavior wherever possib
 
 ## Build on device
 
-Place `Cydia_Rootless_GitHub_1.1.49+rootless.3_FINAL.zip` in `/var/mobile/Documents`, open a terminal on the jailbroken device, then run:
+Clone the current public source directly from GitHub, then run the release builder:
 
 ```sh
-cd /var/mobile/Documents && rm -rf Cydia_Rootless && unzip Cydia_Rootless_GitHub_1.1.49+rootless.3_FINAL.zip && cd Cydia_Rootless && ./run-build.sh
+cd /var/mobile/Documents && rm -rf Cydia_Rootless && git clone https://github.com/BarabaDev/Cydia-Rootless.git Cydia_Rootless && cd Cydia_Rootless && chmod +x run-build.sh && ./run-build.sh
 ```
+
+For a tagged release archive, download the ZIP from GitHub Releases, place it in `/var/mobile/Documents`, extract it as `Cydia_Rootless`, then run `./run-build.sh`.
 
 The release runner performs rootless safety checks, builds Cydia, packages and verifies the Debian files, applies the confirmed on-device runtime update workflow, and runs release diagnostics/preflight checks.
 
