@@ -1,0 +1,36 @@
+--- !tapi-tbd
+tbd-version:     4
+targets:         [ arm64-ios ]
+install-name:    '@rpath/libgnutls.30.dylib'
+current-version: 30.0
+compatibility-version: 30.0
+exports:
+  - targets:         [ arm64-ios ]
+    symbols:         [ _gnutls_bye,
+                       _gnutls_certificate_allocate_credentials,
+                       _gnutls_certificate_set_verify_flags,
+                       _gnutls_certificate_set_x509_crl_file,
+                       _gnutls_certificate_set_x509_key_file,
+                       _gnutls_certificate_set_x509_system_trust,
+                       _gnutls_certificate_set_x509_trust_file,
+                       _gnutls_certificate_type_get,
+                       _gnutls_certificate_verification_status_print,
+                       _gnutls_credentials_set,
+                       _gnutls_error_is_fatal,
+                       _gnutls_free,
+                       _gnutls_handshake,
+                       _gnutls_init,
+                       _gnutls_record_check_pending,
+                       _gnutls_record_get_direction,
+                       _gnutls_record_recv,
+                       _gnutls_record_send,
+                       _gnutls_server_name_set,
+                       _gnutls_session_get_verify_cert_status,
+                       _gnutls_session_set_verify_cert,
+                       _gnutls_set_default_priority,
+                       _gnutls_strerror,
+                       _gnutls_transport_set_int2,
+                       _gnutls_transport_set_ptr,
+                       _gnutls_transport_set_pull_function,
+                       _gnutls_transport_set_push_function ]
+...

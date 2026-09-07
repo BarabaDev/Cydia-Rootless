@@ -1,0 +1,15 @@
+--- !tapi-tbd
+tbd-version:     4
+targets:         [ arm64-ios ]
+install-name:    '/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices'
+current-version: 1.0
+compatibility-version: 1.0
+exports:
+  - targets:         [ arm64-ios ]
+    symbols:         [ _SBBundlePathForDisplayIdentifier,
+                       _SBReboot,
+                       _SBSCopyApplicationDisplayIdentifiers,
+                       _SBSCopyIconImagePathForDisplayIdentifier,
+                       _SBSCopyLocalizedApplicationNameForDisplayIdentifier,
+                       _SBSSpringBoardServerPort ]
+...

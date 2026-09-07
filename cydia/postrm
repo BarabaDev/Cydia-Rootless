@@ -1,0 +1,20 @@
+#!/var/jb/bin/bash
+set -euo pipefail
+
+# A normal remove clears only the package-private runtime directory in prerm.
+# A deliberate purge additionally removes Cydia-owned caches/preferences and
+# the source file created exclusively by Cydia. External Sileo/bootstrap source
+# files and shared /var/jb/var/lib/apt state are never modified.
+case "${1:-}" in
+    purge)
+        /var/jb/bin/rm -rf -- \
+            /var/jb/var/lib/cydia \
+            /var/mobile/Library/Caches/com.saurik.Cydia \
+            /var/mobile/Library/Cydia
+        /var/jb/bin/rm -f -- \
+            /var/jb/etc/apt/sources.list.d/cydia-added.list \
+            /var/mobile/Library/Preferences/com.saurik.Cydia.plist
+        ;;
+esac
+
+exit 0

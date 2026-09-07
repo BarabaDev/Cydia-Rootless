@@ -1,0 +1,33 @@
+# macOS and editor metadata
+.DS_Store
+.AppleDouble/
+._*
+*.swp
+*~
+
+# Generated packages, build outputs and diagnostics
+cydia/debs/
+cydia/Objects/
+cydia/Images/
+cydia/_/
+cydia/__/
+cydia/bins/
+cydia/MobileCydia
+cydia/postinst
+cydia/cydo
+cydia/du
+cydia/setnsfpn
+cydia/cfversion
+cydia/Cydia.deb
+cydia/aptmethod.h
+cydia/http.cc
+cydia/http.h
+*.dSYM/
+*.o
+*.a
+*.log
+__pycache__/
+*.pyc
+
+# Private development checks
+/Tests/

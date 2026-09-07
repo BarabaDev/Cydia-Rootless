@@ -1,0 +1,465 @@
+Cydia 1.1.22 Rootless — component licenses and notices
+
+This is an unofficial edition modified by BarabaDev on 7 September 2026.
+Original Cydia: Jay Freeman (saurik), SaurikIT, LLC.
+Modified Cydia base: Sam Bingner.
+No endorsement by the original authors is claimed.
+
+Cydia source files retain their GNU GPL version 3 or later terms.
+Cytore.hpp retains GNU AGPL version 3 or later terms. The combined work is
+subject to the applicable terms of both licenses, including section 13.
+APT retains its GPL version 2 or later terms and individual file notices.
+The complete license texts are in COPYING and this Licenses directory.
+Original notices below are reproduced from the corresponding source files.
+
+Cydia and CyteKit/Menes
+Source: cydia/MobileCydia.mm
+------------------------------------------------------------------------
+/* Cydia - iPhone UIKit Front-End for Debian APT
+ * Original work Copyright (C) 2008-2017  Jay Freeman (saurik)
+ * Modified work Copyright (C) 2018       Sam Bingner (sbingner)
+*/
+
+/* GNU General Public License, Version 3 {{{ */
+/*
+ * Cydia is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published
+ * by the Free Software Foundation, either version 3 of the License,
+ * or (at your option) any later version.
+ *
+ * Cydia is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Cydia.  If not, see <http://www.gnu.org/licenses/>.
+**/
+/* }}} */
+
+Cytore / Cyndir
+Source: cydia/Cytore.hpp
+------------------------------------------------------------------------
+// Copyright Notice (GNU Affero GPL) {{{
+/* Cyndir - (Awesome) Memory Mapped Dictionary
+ * Copyright (C) 2010  Jay Freeman (saurik)
+*/
+
+/*
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ * 
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+// }}}
+
+APT
+Source: cydia/apt64/COPYING
+------------------------------------------------------------------------
+Apt is copyright 1997, 1998, 1999 Jason Gunthorpe and others.
+Apt is currently developed by APT Development Team <deity@lists.debian.org>.
+
+License: GPLv2+
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.
+
+See /usr/share/common-licenses/GPL-2, or
+<http://www.gnu.org/copyleft/gpl.txt> for the terms of the latest version
+of the GNU General Public License.
+
+iPhone Open SDK declarations
+Source: cydia/lockdown.h
+------------------------------------------------------------------------
+/* iPhone Open SDK - Free Open Source Anti-Apple SDK
+ * Copyright (C) 2008  Jay Freeman (saurik)
+*/
+
+/*
+ *        Redistribution and use in source and binary
+ * forms, with or without modification, are permitted
+ * provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the
+ *    above copyright notice, this list of conditions
+ *    and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the
+ *    above copyright notice, this list of conditions
+ *    and the following disclaimer in the documentation
+ *    and/or other materials provided with the
+ *    distribution.
+ * 3. The name of the author may not be used to endorse
+ *    or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS''
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING,
+ * BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR
+ * TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
+File descriptor streams
+Source: cydia/fdstream.hpp
+------------------------------------------------------------------------
+/* The following code declares classes to read from and write to
+ * file descriptore or file handles.
+ *
+ * See
+ *      http://www.josuttis.com/cppcode
+ * for details and the latest version.
+ *
+ * - open:
+ *      - integrating BUFSIZ on some systems?
+ *      - optimized reading of multiple characters
+ *      - stream for reading AND writing
+ *      - i18n
+ *
+ * (C) Copyright Nicolai M. Josuttis 2001.
+ * Permission to copy, use, modify, sell and distribute this software
+ * is granted provided this copyright notice appears in all copies.
+ * This software is provided "as is" without express or implied
+ * warranty, and with no claim as to its suitability for any purpose.
+ *
+ * Version: Jul 28, 2002
+ * History:
+ *  Jul 28, 2002: bugfix memcpy() => memmove()
+ *                fdinbuf::underflow(): cast for return statements
+ *  Aug 05, 2001: first public version
+ */
+
+SHA-2 implementation
+Source: cydia/apt64/apt-pkg/contrib/sha2_internal.cc
+------------------------------------------------------------------------
+/*
+ * FILE:	sha2.c
+ * AUTHOR:	Aaron D. Gifford - http://www.aarongifford.com/
+ * 
+ * Copyright (c) 2000-2001, Aaron D. Gifford
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the copyright holder nor the names of contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ * 
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTOR(S) ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTOR(S) BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ *
+ */
+
+BSD resolver declarations
+Source: cydia/apt64/apt-pkg/nameser_compat.h
+------------------------------------------------------------------------
+/* Copyright (c) 1983, 1989
+ *    The Regents of the University of California.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 4. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+triehash build tool
+Source: cydia/apt64/triehash/triehash.pl
+------------------------------------------------------------------------
+#!/usr/bin/perl -w
+#
+# Copyright (C) 2016 Julian Andres Klode <jak@jak-linux.org>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+lookup3
+Source: cydia/lookup3.c
+------------------------------------------------------------------------
+/*
+-------------------------------------------------------------------------------
+lookup3.c, by Bob Jenkins, May 2006, Public Domain.
+
+These are functions for producing 32-bit hashes for hash table lookup.
+hashword(), hashlittle(), hashlittle2(), hashbig(), mix(), and final() 
+are externally useful functions.  Routines to test the hash are included 
+if SELF_TEST is defined.  You can use this free for any purpose.  It's in
+the public domain.  It has no warranty.
+
+You probably want to use hashlittle().  hashlittle() and hashbig()
+hash byte arrays.  hashlittle() is is faster than hashbig() on
+little-endian machines.  Intel and AMD are little-endian machines.
+On second thought, you probably want hashlittle2(), which is identical to
+hashlittle() except it returns two 32-bit hashes for the price of one.  
+You could implement hashbig2() if you wanted but I haven't bothered here.
+
+If you want to find a hash of, say, exactly 7 integers, do
+  a = i1;  b = i2;  c = i3;
+  mix(a,b,c);
+  a += i4; b += i5; c += i6;
+  mix(a,b,c);
+  a += i7;
+  final(a,b,c);
+then use c as the hash value.  If you have a variable length array of
+4-byte integers to hash, use hashword().  If you have a byte array (like
+a character string), use hashlittle().  If you have several byte arrays, or
+a mix of things, see the comments above hashlittle().  
+
+Why is this so big?  I read 12 bytes at a time into 3 4-byte integers, 
+then mix those integers.  This is fast (you can do a lot more thorough
+mixing with 12*3 instructions on 3 integers than you can with 3 instructions
+on 1 byte), but shoehorning those bytes into integers efficiently is messy.
+-------------------------------------------------------------------------------
+*/
+
+APT MD5
+Source: cydia/apt64/apt-pkg/contrib/md5.cc
+------------------------------------------------------------------------
+/* ######################################################################
+   
+   MD5Sum - MD5 Message Digest Algorithm.
+
+   This code implements the MD5 message-digest algorithm. The algorithm is 
+   due to Ron Rivest.  This code was written by Colin Plumb in 1993, no 
+   copyright is claimed. This code is in the public domain; do with it what 
+   you wish.
+ 
+   Equivalent code is available from RSA Data Security, Inc. This code has 
+   been tested against that, and is equivalent, except that you don't need to 
+   include two pages of legalese with every copy.
+
+   To compute the message digest of a chunk of bytes, instantiate the class,
+   and repeatedly call one of the Add() members. When finished the Result 
+   method will return the Hash and finalize the value.
+   
+   Changed so as no longer to depend on Colin Plumb's `usual.h' header
+   definitions; now uses stuff from dpkg's config.h.
+    - Ian Jackson <ijackson@nyx.cs.du.edu>.
+   
+   Changed into a C++ interface and made work with APT's config.h.
+    - Jason Gunthorpe <jgg@gpu.srv.ualberta.ca>
+   
+   Still in the public domain.
+
+   The classes use arrays of char that are a specific size. We cast those
+   arrays to uint8_t's and go from there. This allows us to advoid using
+   the uncommon inttypes.h in a public header or internally newing memory.
+   In theory if C9x becomes nicely accepted
+   
+   ##################################################################### */
+
+APT SHA-1
+Source: cydia/apt64/apt-pkg/contrib/sha1.cc
+------------------------------------------------------------------------
+/* ######################################################################
+   
+   SHA1 - SHA-1 Secure Hash Algorithm.
+   
+   This file is a Public Domain wrapper for the Public Domain SHA1 
+   calculation code that is at it's end.
+
+   The algorithm was originally implemented by 
+   Steve Reid <sreid@sea-to-sky.net> and later modified by 
+   James H. Brown <jbrown@burgoyne.com>.
+   
+   Modifications for APT were done by Alfredo K. Kojima and Jason 
+   Gunthorpe.
+   
+   Still in the public domain.
+   
+   Test Vectors (from FIPS PUB 180-1)
+   "abc"
+   A9993E36 4706816A BA3E2571 7850C26C 9CD0D89D
+   "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"
+   84983E44 1C3BD26E BAAE4AA1 F95129E5 E54670F1
+   A million repetitions of "a"
+   34AA973C D4C4DAA4 F61EEB2B DBAD2731 6534016F
+   
+   ##################################################################### 
+ */
+
+APT netrc
+Source: cydia/apt64/apt-pkg/contrib/netrc.cc
+------------------------------------------------------------------------
+/* ######################################################################
+
+   netrc file parser - returns the login and password of a give host in
+                       a specified netrc-type file
+
+   Originally written by Daniel Stenberg, <daniel@haxx.se>, et al. and
+   placed into the Public Domain, do with it what you will.
+
+   ##################################################################### */
+
+APT RFC 2553 emulation
+Source: cydia/apt64/methods/rfc2553emu.cc
+------------------------------------------------------------------------
+/* ######################################################################
+
+   RFC 2553 Emulation - Provides emulation for RFC 2553 getaddrinfo,
+                        freeaddrinfo and getnameinfo
+
+   This is really C code, it just has a .cc extensions to play nicer with
+   the rest of APT.
+   
+   Originally written by Jason Gunthorpe <jgg@debian.org> and placed into
+   the Public Domain, do with it what you will.
+
+   ##################################################################### */
+
+APT CRC16
+Source: cydia/apt64/apt-pkg/contrib/crc-16.cc
+------------------------------------------------------------------------
+/* ######################################################################
+   
+   CRC16 - Compute a 16bit crc very quickly
+   
+   This was ripped out of the linux 2.2 kernel source (irda/crc.c) and
+   is credited to ppp.c by Michael Callahan <callahan@maths.ox.ac.uk> and
+   Al Longyear <longyear@netcom.com>
+   
+   Modified by Jason Gunthorpe <jgg@debian.org> to fit the local coding
+   style, this code is believed to be in the Public Domain.
+   
+   ##################################################################### */
+
+GNU compatibility routines
+Source: cydia/apt64/apt-pkg/memrchr.cc
+------------------------------------------------------------------------
+/* memrchr -- find the last occurrence of a byte in a memory block
+
+   Copyright (C) 1991, 1993, 1996-1997, 1999-2000, 2003-2015 Free Software
+   Foundation, Inc.
+
+   Based on strlen implementation by Torbjorn Granlund (tege@sics.se),
+   with help from Dan Sahlin (dan@sics.se) and
+   commentary by Jim Blandy (jimb@ai.mit.edu);
+   adaptation to memchr suggested by Dick Karpinski (dick@cca.ucsf.edu),
+   and implemented by Roland McGrath (roland@ai.mit.edu).
+
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 3 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+
+GNU rawmemchr
+Source: cydia/apt64/apt-pkg/rawmemchr.cc
+------------------------------------------------------------------------
+/* Searching in a string.
+   Copyright (C) 2008-2015 Free Software Foundation, Inc.
+
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 3 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+
+GNU strchrnul
+Source: cydia/apt64/apt-pkg/strchrnul.cc
+------------------------------------------------------------------------
+/* Searching in a string.
+   Copyright (C) 2003, 2007-2015 Free Software Foundation, Inc.
+
+   This program is free software: you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 3 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+

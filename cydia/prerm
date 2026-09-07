@@ -1,0 +1,14 @@
+#!/var/jb/bin/bash
+set -euo pipefail
+
+# Cydia-private runtime state. Sources and bootstrap APT state live elsewhere
+# and must never be touched here. Removing this exact private directory before
+# dpkg removes the package-owned directory prevents the permanent
+# "directory ... not empty" warning.
+case "${1:-}" in
+    remove|deconfigure)
+        /var/jb/bin/rm -rf -- /var/jb/var/lib/cydia
+        ;;
+esac
+
+exit 0

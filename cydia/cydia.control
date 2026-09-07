@@ -1,0 +1,19 @@
+Package: cydia
+Priority: required
+Section: Packaging
+Maintainer: BarabaDev
+Architecture: iphoneos-arm64
+Version: 
+Replaces: cydia-lproj (<= 1.1.22), bigboss, bigbossbetarepo, com.sosiphone.addcydia, cydia-sources, ispazio.net, modmyifone, saurik, ste, yellowsn0w.com, zodttd
+Depends: apt, gpgv, darwintools, debianutils, dpkg (>= 1.19.1), libgnutls30, sed, shell-cmds, system-cmds, uikittools (>= 1.1.14), bzip2, gzip, lz4, zstd, xz-utils | xz
+Conflicts: cydia-lproj (<= 1.1.22), bigboss, bigbossbetarepo, com.sosiphone.addcydia, cydia-sources, ispazio.net, modmyifone, ste, yellowsn0w.com, zodttd
+Pre-Depends: debianutils, dpkg (>= 1.16.1), firmware (>= 15.0)
+Provides: bigbossbetarepo, cydia-sources
+Description: graphical iPhone front-end for APT
+ Unofficial Modern Rootless edition modified by BarabaDev on 7 September 2026.
+ Original Cydia by Jay Freeman (saurik); modified base by Sam Bingner.
+Name: Cydia Installer
+Author: Jay Freeman (saurik) <saurik@saurik.com>
+Depiction: http://cydia.saurik.com/info/cydia/
+Icon: https://barabadev.com/assets/cydia.png
+Tag: purpose::uikit, cydia::essential, role::enduser

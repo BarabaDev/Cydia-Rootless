@@ -1,0 +1,13 @@
+--- !tapi-tbd
+tbd-version:     4
+targets:         [ arm64-ios ]
+install-name:    '/usr/lib/liblockdown.dylib'
+current-version: 1.0
+compatibility-version: 1.0
+exports:
+  - targets:         [ arm64-ios ]
+    symbols:         [ _kLockdownUniqueDeviceIDKey,
+                       _lockdown_connect,
+                       _lockdown_copy_value,
+                       _lockdown_disconnect ]
+...

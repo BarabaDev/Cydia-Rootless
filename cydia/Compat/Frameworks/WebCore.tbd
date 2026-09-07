@@ -1,0 +1,10 @@
+--- !tapi-tbd
+tbd-version:     4
+targets:         [ arm64-ios ]
+install-name:    '/System/Library/PrivateFrameworks/WebCore.framework/WebCore'
+current-version: 1.0
+compatibility-version: 1.0
+exports:
+  - targets:         [ arm64-ios ]
+    symbols:         [ _WebThreadLock, _WebThreadUnlock ]
+...
