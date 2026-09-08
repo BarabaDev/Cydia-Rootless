@@ -522,3 +522,7 @@
 "WELCOME_TO_CYDIA" = "Välkommen till Cydia™";
 "WHO_ARE_YOU" = "Vem är du?";
 "YES" = "Ja";
+
+/* Commercial package status. */
+"Modern.Paid package" = "Betalpaket";
+"Modern.Checking purchase…" = "Kontrollerar köpstatus…";

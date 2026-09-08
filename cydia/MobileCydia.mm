@@ -1454,6 +1454,14 @@ class CydiaStatus :
 /* Database Interface {{{ */
 typedef std::map< unsigned long, _H<Source> > SourceMap;
 
+// Distinguish an untouched queue from a dpkg attempt, which may have applied
+// only some operations before failing and must always be read back from disk.
+enum CYPackageTransactionResult {
+    CYPackageTransactionNotStarted,
+    CYPackageTransactionAttempted,
+    CYPackageTransactionCompleted
+};
+
 @interface Database : NSObject {
     NSZone *zone_;
     CYPool pool_;
@@ -1516,8 +1524,8 @@ typedef std::map< unsigned long, _H<Source> > SourceMap;
 - (void) configure;
 - (bool) prepare;
 - (void) perform;
-- (void) performWithRequestedIdentifiers:(NSSet *)requestedIdentifiers;
-- (void) performWithRequestedIdentifiers:(NSSet *)requestedIdentifiers retryCount:(NSUInteger)retryCount;
+- (CYPackageTransactionResult) performWithRequestedIdentifiers:(NSSet *)requestedIdentifiers;
+- (CYPackageTransactionResult) performWithRequestedIdentifiers:(NSSet *)requestedIdentifiers retryCount:(NSUInteger)retryCount;
 - (NSArray *) transactionOperationsForRequestedIdentifiers:(NSSet *)requestedIdentifiers;
 - (NSSet *) transactionPlan;
 - (bool) restoreTransactionOperations:(NSArray *)operations title:(NSString *)title;
@@ -5389,7 +5397,7 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
         ));
         if (authorized == nil) {
             NSString *reason([authorizationError localizedDescription] ?: CYLocalize(@"The repository did not authorize this download."));
-            NSString *message([NSString stringWithFormat:@"Unable to authorize %@: %@", [package name] ?: [package id], reason]);
+            NSString *message([NSString stringWithFormat:@"%@\n\n%@", [package name] ?: [package id], reason]);
             [delegate_ addProgressEventOnMainThread:[CydiaProgressEvent eventWithMessage:message ofType:kCydiaProgressEventTypeError] forTask:title];
             return failPrepare();
         }
@@ -5583,11 +5591,11 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
     [self performWithRequestedIdentifiers:nil retryCount:0];
 }
 
-- (void) performWithRequestedIdentifiers:(NSSet *)requestedIdentifiers {
-    [self performWithRequestedIdentifiers:requestedIdentifiers retryCount:0];
+- (CYPackageTransactionResult) performWithRequestedIdentifiers:(NSSet *)requestedIdentifiers {
+    return [self performWithRequestedIdentifiers:requestedIdentifiers retryCount:0];
 }
 
-- (void) performWithRequestedIdentifiers:(NSSet *)requestedIdentifiers retryCount:(NSUInteger)retryCount {
+- (CYPackageTransactionResult) performWithRequestedIdentifiers:(NSSet *)requestedIdentifiers retryCount:(NSUInteger)retryCount {
     bool substrate(RestartSubstrate_);
     RestartSubstrate_ = false;
 
@@ -5597,13 +5605,13 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
         [delegate_ addProgressEventOnMainThread:[CydiaProgressEvent
             eventWithMessage:@"Package requirements must be resolved before applying changes. Review the package queue and try again."
             ofType:kCydiaProgressEventTypeError] forTask:title];
-        return;
+        return CYPackageTransactionNotStarted;
     }
 
     NSMutableArray *before = [NSMutableArray arrayWithCapacity:16]; {
         pkgSourceList list;
         if ([self popErrorWithTitle:title forReadList:list])
-            return;
+            return CYPackageTransactionNotStarted;
         for (pkgSourceList::const_iterator source = list.begin(); source != list.end(); ++source)
             [before addObject:[NSString stringWithUTF8String:(*source)->GetURI().c_str()]];
     }
@@ -5613,7 +5621,7 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
         if (state.Mode == pkgDepCache::ModeInstall && CYRootlessBlockedLegacyPackage(iterator.Name())) {
             NSString *message([NSString stringWithFormat:@"Blocked rootful-only package %s before dpkg execution.", iterator.Name()]);
             [delegate_ addProgressEventOnMainThread:[CydiaProgressEvent eventWithMessage:message ofType:kCydiaProgressEventTypeError] forTask:title];
-            return;
+            return CYPackageTransactionNotStarted;
         }
     }
 
@@ -5640,7 +5648,7 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
                 eventWithMessage:@"Package downloads could not be completed. Try again."
                 ofType:kCydiaProgressEventTypeError] forTask:title];
         CYClearSensitiveDownloadURLs();
-        return;
+        return CYPackageTransactionNotStarted;
     }
 
     bool failed = false;
@@ -5668,29 +5676,30 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
 
     if (failed) {
         _trace();
-        return;
+        return CYPackageTransactionNotStarted;
     }
-
-    if (substrate)
-        RestartSubstrate_ = true;
 
     if (![delock_ isEqual:GetStatusDate()]) {
         if (retryCount == 0 && [self rebuildTransactionForRequestedIdentifiers:requestedIdentifiers title:title]) {
             CYRootlessDiag(@"DPKG_LOCK", @"automatic retry start attempt=1 maxAttempts=1");
-            [self performWithRequestedIdentifiers:requestedIdentifiers retryCount:1];
-            return;
+            CYPackageTransactionResult result([self performWithRequestedIdentifiers:requestedIdentifiers retryCount:1]);
+            if (substrate && result != CYPackageTransactionNotStarted)
+                RestartSubstrate_ = true;
+            return result;
         }
         CYRootlessDiag(@"DPKG_LOCK", @"level=ERROR status changed before commit retryCount=%lu automaticRecoveryAvailable=%d",
             (unsigned long) retryCount, [requestedIdentifiers count] != 0);
         [delegate_ addProgressEventOnMainThread:[CydiaProgressEvent eventWithMessage:UCLocalize("DPKG_LOCKED") ofType:kCydiaProgressEventTypeError] forTask:title];
-        return;
+        return CYPackageTransactionNotStarted;
     }
 
     // Stop() has already disabled the Cancel button on the main thread.
     // Honor every cancellation accepted before that transition, even if APT
     // finished its last download before the next periodic cancellation pulse.
     if ([[self safeProgressDelegate] isProgressCancelled])
-        return;
+        return CYPackageTransactionNotStarted;
+    if (substrate)
+        RestartSubstrate_ = true;
     delock_ = nil;
 
     // Persist a crash marker before the first dpkg child starts.  If Cydia is
@@ -5728,26 +5737,27 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
     symlink([oextended UTF8String], [nextended UTF8String]);
 
     if ([self popErrorWithTitle:title])
-        return;
+        return CYPackageTransactionAttempted;
 
     if (result != pkgPackageManager::Completed) {
         _trace();
         [delegate_ addProgressEventOnMainThread:[CydiaProgressEvent
             eventWithMessage:@"Package changes did not finish. Review the details before trying again."
             ofType:kCydiaProgressEventTypeError] forTask:title];
-        return;
+        return CYPackageTransactionAttempted;
     }
 
     NSMutableArray *after = [NSMutableArray arrayWithCapacity:16]; {
         pkgSourceList list;
         if ([self popErrorWithTitle:title forReadList:list])
-            return;
+            return CYPackageTransactionAttempted;
         for (pkgSourceList::const_iterator source = list.begin(); source != list.end(); ++source)
             [after addObject:[NSString stringWithUTF8String:(*source)->GetURI().c_str()]];
     }
 
     if (![before isEqualToArray:after] && Finish_ == 0)
         [self update];
+    return CYPackageTransactionCompleted;
 }
 
 - (bool) delocked {
@@ -7756,6 +7766,7 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
     _H<UIImageView> iconView_;
     _H<UIImageView> badgeView_;
     _H<UIImageView> statusView_;
+    _H<UIImageView> paidView_;
     _H<UILabel> nameLabel_;
     _H<UILabel> sourceLabel_;
     _H<UILabel> descriptionLabel_;
@@ -7815,10 +7826,25 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
         [descriptionLabel_ setNumberOfLines:1];
         [descriptionLabel_ setAdjustsFontForContentSizeCategory:YES];
 
+        paidView_ = [[[CydiaSymbolView alloc] initWithImage:[UIImage cy_symbolNamed:@"creditcard"]] autorelease];
+        [paidView_ setContentMode:UIViewContentModeScaleAspectFit];
+        [paidView_ setTintColor:CYModernCommercialColor()];
+        [paidView_ setPreferredSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:16.0f weight:UIImageSymbolWeightMedium]];
+        [paidView_ setHidden:YES];
+        NSLayoutConstraint *paidWidth([[paidView_ widthAnchor] constraintEqualToConstant:20.0f]);
+        [paidWidth setPriority:999];
+        [paidWidth setActive:YES];
+        [[paidView_ heightAnchor] constraintEqualToConstant:20.0f].active = YES;
+        [paidView_ setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
         UILabel *nameLabel(nameLabel_);
         UILabel *sourceLabel(sourceLabel_);
         UILabel *descriptionLabel(descriptionLabel_);
-        UIStackView *labels([[[UIStackView alloc] initWithArrangedSubviews:[NSArray arrayWithObjects:nameLabel, sourceLabel, descriptionLabel, nil]] autorelease]);
+        UIImageView *paidView(paidView_);
+        UIStackView *nameRow([[[UIStackView alloc] initWithArrangedSubviews:@[nameLabel, paidView]] autorelease]);
+        [nameRow setAxis:UILayoutConstraintAxisHorizontal];
+        [nameRow setAlignment:UIStackViewAlignmentCenter];
+        [nameRow setSpacing:6.0f];
+        UIStackView *labels([[[UIStackView alloc] initWithArrangedSubviews:[NSArray arrayWithObjects:nameRow, sourceLabel, descriptionLabel, nil]] autorelease]);
         [labels setTranslatesAutoresizingMaskIntoConstraints:NO];
         [labels setAxis:UILayoutConstraintAxisVertical];
         [labels setAlignment:UIStackViewAlignmentFill];
@@ -7854,7 +7880,7 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
 }
 
 - (NSString *) accessibilityLabel {
-    return name_;
+    return commercial_ ? [@[(NSString *)name_ ?: @"", CYLocalize(@"Paid package")] componentsJoinedByString:@", "] : (NSString *)name_;
 }
 
 - (void) prepareForReuse {
@@ -7862,6 +7888,8 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
     remoteIconTask_ = nil;
     representedPackageIdentifier_ = nil;
     [iconView_ setImage:nil];
+    [paidView_ setHidden:YES];
+    commercial_ = false;
     [super prepareForReuse];
 }
 
@@ -7982,6 +8010,8 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
     }
     [badgeView_ setImage:badge_];
     [badgeView_ setHidden:badge_ == nil];
+    [paidView_ setHidden:!commercial_];
+    [paidView_ setTintColor:CYModernCommercialColor()];
     [nameLabel_ setText:name_];
     [nameLabel_ setTextColor:commercial_ ? CYModernCommercialColor() : [UIColor labelColor]];
     [sourceLabel_ setText:source_];
@@ -8278,6 +8308,16 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
 /* }}} */
 /* Package Controller {{{ */
 #import "Cydia/PackageActionsController.h"
+enum CYCommercialPackageAccess {
+    CYCommercialPackageAccessUnknown,
+    CYCommercialPackageAccessChecking,
+    CYCommercialPackageAccessInstall,
+    CYCommercialPackageAccessSignIn,
+    CYCommercialPackageAccessBuy,
+    CYCommercialPackageAccessRetry,
+    CYCommercialPackageAccessUnavailable,
+};
+
 @interface CYPackageController : CydiaWebViewController <
     ASWebAuthenticationPresentationContextProviding
 > {
@@ -8291,6 +8331,10 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
     _H<ASWebAuthenticationSession> purchaseSession_;
     unsigned purchaseEra_;
     bool purchaseInProgress_;
+    CYCommercialPackageAccess purchaseAccess_;
+    _H<NSString> purchasePrice_;
+    BOOL purchaseReturnToVersions_;
+    BOOL returningFromRepositoryAccount_;
     _H<NSURLSessionDataTask> detailIconTask_;
 }
 
@@ -8329,6 +8373,20 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
 }
 
 - (void) _clickButtonWithPackage:(Package *)package {
+    if ([package isCommercial]) {
+        switch (purchaseAccess_) {
+            case CYCommercialPackageAccessSignIn:
+            case CYCommercialPackageAccessUnavailable:
+                [self openRepositoryAccount]; return;
+            case CYCommercialPackageAccessBuy:
+                [self confirmPurchaseForPackage:package]; return;
+            case CYCommercialPackageAccessRetry:
+                [self refreshCommercialPurchaseAction]; return;
+            case CYCommercialPackageAccessChecking:
+                return;
+            default: break;
+        }
+    }
     [self.delegate installPackage:package];
 }
 
@@ -8387,7 +8445,7 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
     else if ([name isEqualToString:@"REINSTALL"]);
     else if ([name isEqualToString:@"UPGRADE"]);
     else return;
-    [self.delegate installPackage:package_];
+    [self _clickButtonWithPackage:package_];
 }
 
 - (bool) _allowJavaScriptPanel {
@@ -8459,7 +8517,14 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
 }
 
 - (void) reloadData {
+    ++purchaseEra_;
+    purchaseAccess_ = CYCommercialPackageAccessUnknown;
+    purchasePrice_ = nil;
+    purchaseReturnToVersions_ = NO;
     [super reloadData];
+    [modernDetail_ setActionEnabled:YES];
+    [modernDetail_ setAccountNotice:nil target:nil action:NULL];
+    [modernDetail_ setCommercial:NO];
 
     UINavigationController *presented = (UINavigationController *)[self presentedViewController];
     if (CYInvalidatePackageActionMenu(presented))
@@ -8566,17 +8631,17 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
                 [detailIconTask_ resume];
             }
         }
+        [modernDetail_ setCommercial:commercial_];
         BOOL destructive(buttons_.size() == 1 && [buttons_[0].first isEqualToString:@"REMOVE"]);
         [modernDetail_ setActionTitle:title destructive:destructive target:self action:@selector(customButtonClicked)];
         [modernDetail_ setNavigationTarget:self settingsAction:@selector(openPackageSettings) filesAction:@selector(openPackageFiles) showFiles:[package_ installed] != nil];
-        if (commercial_ && [package_ uninstalled] && source != nil)
+        if (commercial_ && source != nil)
             [self refreshCommercialPurchaseAction];
     }
 }
 
-// Sileo Payment API: for an unpurchased, purchasable commercial package the
-// native Install action becomes a Buy action showing the provider price. The
-// era guard drops any result that arrives after the controller moved on.
+// Payment providers remain authoritative for access. A commercial tag alone
+// neither grants a download nor tells the user where to connect an account.
 - (void) refreshCommercialPurchaseAction {
     Source *source([package_ source]);
     if (source == nil || package_ == nil)
@@ -8585,21 +8650,173 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
     NSString *packageID([package_ id]);
     NSString *model(Machine_ != NULL ? [NSString stringWithUTF8String:Machine_] : nil);
     unsigned era(++purchaseEra_);
+    purchaseAccess_ = CYCommercialPackageAccessChecking;
+    BOOL primaryInstall(buttons_.size() == 1 && [buttons_[0].first isEqualToString:@"INSTALL"]);
+    [modernDetail_ setAccountNotice:CYLocalize(@"Checking purchase…") target:self action:@selector(openRepositoryAccount)];
+    if (primaryInstall) {
+        [modernDetail_ setActionTitle:CYLocalize(@"Checking purchase…") destructive:NO target:self action:@selector(refreshCommercialPurchaseAction)];
+        [modernDetail_ setActionEnabled:NO];
+    }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSError *error(nil);
         NSDictionary *info(CYRepositoryPackageInfo(repositoryURL, packageID, UniqueID_, model, &error));
         dispatch_async(dispatch_get_main_queue(), ^{
             if (era != purchaseEra_ || package_ == nil || ![[package_ id] isEqualToString:packageID])
                 return;
-            if (info == nil)
+            [modernDetail_ setActionEnabled:YES];
+            if (CYRepositoryAccountErrorRequiresSignIn(error)) {
+                purchaseAccess_ = CYCommercialPackageAccessSignIn;
+                [modernDetail_ setAccountNotice:CYLocalize(@"Sign in through Manage Account first.") target:self action:@selector(openRepositoryAccount)];
+                if (primaryInstall)
+                    [modernDetail_ setActionTitle:CYLocalize(@"Sign In") destructive:NO target:self action:@selector(openRepositoryAccount)];
                 return;
-            if ([[info objectForKey:@"purchased"] boolValue] || ![[info objectForKey:@"available"] boolValue])
+            }
+            if (info == nil) {
+                if (CYRepositoryAccountErrorIsUnsupportedProvider(error)) {
+                    purchaseAccess_ = CYCommercialPackageAccessInstall;
+                    // Older commercial repositories may not implement this
+                    // account API. Keep their actions; download checks still apply.
+                    [modernDetail_ setAccountNotice:[error localizedDescription] target:self action:@selector(openRepositoryAccount)];
+                    if (primaryInstall)
+                        [modernDetail_ setActionTitle:UCLocalize("INSTALL") destructive:NO target:self action:@selector(customButtonClicked)];
+                    return;
+                }
+                purchaseAccess_ = CYCommercialPackageAccessRetry;
+                [modernDetail_ setAccountNotice:[error localizedDescription] ?: CYLocalize(@"The repository account rejected the request.") target:self action:@selector(openRepositoryAccount)];
+                if (primaryInstall)
+                    [modernDetail_ setActionTitle:CYLocalize(@"Retry") destructive:NO target:self action:@selector(refreshCommercialPurchaseAction)];
                 return;
-            NSString *price([info objectForKey:@"price"]);
-            NSString *title([price length] == 0 ? CYLocalize(@"Buy") : [NSString stringWithFormat:CYLocalize(@"Buy \u00b7 %@"), price]);
-            [modernDetail_ setActionTitle:title destructive:NO target:self action:@selector(buyButtonClicked)];
+            }
+            if ([[info objectForKey:@"purchased"] boolValue]) {
+                purchaseAccess_ = CYCommercialPackageAccessInstall;
+                // Some providers allow downloading before activation in their
+                // Settings pane. Do not infer ownership from account item count.
+                [modernDetail_ setAccountNotice:nil target:nil action:NULL];
+                if (primaryInstall)
+                    [modernDetail_ setActionTitle:UCLocalize("INSTALL") destructive:NO target:self action:@selector(customButtonClicked)];
+            } else if ([[info objectForKey:@"available"] boolValue]) {
+                purchaseAccess_ = CYCommercialPackageAccessBuy;
+                purchasePrice_ = [info objectForKey:@"price"];
+                [modernDetail_ setAccountNotice:nil target:nil action:NULL];
+                if (primaryInstall) {
+                    NSString *price([info objectForKey:@"price"]);
+                    NSString *title([price length] == 0 ? CYLocalize(@"Buy") : [NSString stringWithFormat:CYLocalize(@"Buy · %@"), price]);
+                    [modernDetail_ setActionTitle:title destructive:NO target:self action:@selector(buyButtonClicked)];
+                }
+            } else {
+                purchaseAccess_ = CYCommercialPackageAccessUnavailable;
+                [modernDetail_ setAccountNotice:CYLocalize(@"This package cannot be purchased.") target:self action:@selector(openRepositoryAccount)];
+                if (primaryInstall)
+                    [modernDetail_ setActionTitle:CYLocalize(@"Manage Account") destructive:NO target:self action:@selector(openRepositoryAccount)];
+            }
         });
     });
+}
+
+- (void) openRepositoryAccount {
+    Source *source([package_ source]);
+    if (source == nil) return;
+    UIViewController *presented([self presentedViewController]);
+    if (presented != nil) {
+        if ([presented isKindOfClass:UINavigationController.class] &&
+            [[(UINavigationController *)presented topViewController] isKindOfClass:CydiaPackageActionsController.class]) {
+            [(CydiaPackageActionsController *)[(UINavigationController *)presented topViewController] invalidateSelection];
+            [presented dismissViewControllerAnimated:YES completion:^{ [self openRepositoryAccount]; }];
+        }
+        return;
+    }
+    ++purchaseEra_;
+    NSString *repositoryURL([source rooturi]);
+    if ([repositoryURL length] == 0) return;
+    NSString *repositoryName([source label] ?: [source name] ?: CYLocalize(@"Repository"));
+    NSDictionary *repository(@{CYRepositoryAccountNameKey:repositoryName, CYRepositoryAccountURLKey:repositoryURL});
+    NSString *model(Machine_ != NULL ? [NSString stringWithUTF8String:Machine_] : nil);
+    CydiaRepositoryAccountsViewController *accounts([[[CydiaRepositoryAccountsViewController alloc]
+        initWithRepositories:@[repository] deviceIdentifier:UniqueID_ deviceModel:model] autorelease]);
+    [accounts setPackageTarget:self action:@selector(openAccountPackage:)];
+    Database *database(database_);
+    [accounts setPackageResolver:^ NSDictionary *(NSString *identifier, NSString *url, BOOL loadIcon) {
+        @synchronized (database) {
+            Package *package([database packageWithName:identifier]);
+            Source *repository(nil);
+            for (Source *candidate in [database sources])
+                if ([[candidate rooturi] isEqualToString:url]) { repository = candidate; break; }
+            if (package == nil || repository == nil || ![package availableFromSource:repository])
+                return nil;
+            NSMutableDictionary *metadata([NSMutableDictionary dictionaryWithDictionary:@{
+                @"name":[package name] ?: identifier, @"summary":[package shortDescription] ?: @"",
+                @"installed":@([package installed] != nil)}]);
+            if (loadIcon) {
+                NSString *address([[package remoteIconURL] absoluteString]);
+                UIImage *icon([address length] == 0 ? nil : [CYModernPackageIconCache() objectForKey:address]);
+                if (icon == nil && [address length] != 0) icon = CYModernPackageIconFromDisk(address);
+                if (icon == nil) icon = [package icon];
+                if (icon != nil) [metadata setObject:icon forKey:@"icon"];
+            }
+            return metadata;
+        }
+    }];
+    returningFromRepositoryAccount_ = YES;
+    [[self navigationController] pushViewController:accounts animated:YES];
+}
+
+- (void) openAccountPackage:(NSString *)identifier {
+    if ([identifier length] == 0) return;
+    CYPackageController *details([[[CYPackageController alloc] initWithDatabase:database_
+        forPackage:identifier withReferrer:nil] autorelease]);
+    [details setDelegate:self.delegate];
+    [[self navigationController] pushViewController:details animated:YES];
+}
+
+- (void) viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    if (returningFromRepositoryAccount_) {
+        returningFromRepositoryAccount_ = NO;
+        [self reloadData];
+    }
+}
+
+// A download choice in Modify or the version picker must explicitly disclose
+// that payment is needed before starting device/payment authentication.
+- (void) confirmPurchaseForPackage:(Package *)package {
+    if (package == nil || purchaseInProgress_) return;
+    unsigned era([database_ era]);
+    unsigned quoteEra(purchaseEra_);
+    UIViewController *presented([self presentedViewController]);
+    if (presented != nil) {
+        if ([presented isKindOfClass:UINavigationController.class] &&
+            [[(UINavigationController *)presented topViewController] isKindOfClass:CydiaPackageActionsController.class]) {
+            [(CydiaPackageActionsController *)[(UINavigationController *)presented topViewController] invalidateSelection];
+            [presented dismissViewControllerAnimated:YES completion:^{
+                if (era == [database_ era]) [self confirmPurchaseForPackage:package];
+                else [self reloadData];
+            }];
+        }
+        return;
+    }
+    NSString *title([purchasePrice_ length] == 0 ? CYLocalize(@"Buy") :
+        [NSString stringWithFormat:CYLocalize(@"Buy · %@"), (NSString *)purchasePrice_]);
+    UIAlertController *alert([UIAlertController alertControllerWithTitle:CYLocalize(@"Purchase")
+        message:[NSString stringWithFormat:@"%@\n%@", [package name] ?: [package id], [package latest] ?: @""]
+        preferredStyle:UIAlertControllerStyleAlert]);
+    [alert addAction:[UIAlertAction actionWithTitle:UCLocalize("CANCEL") style:UIAlertActionStyleCancel handler:nil]];
+    __block UIAlertController *confirmation(alert); // Nonretaining in this manual-reference-counted file.
+    [alert addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        void (^beginPurchase)(void) = ^{
+            if (era != [database_ era] || quoteEra != purchaseEra_ || purchaseAccess_ != CYCommercialPackageAccessBuy) {
+                [self reloadData]; return;
+            }
+            purchaseReturnToVersions_ = ![[package latest] isEqualToString:[package_ latest]];
+            [self buyButtonClicked];
+        };
+        id<UIViewControllerTransitionCoordinator> coordinator([confirmation transitionCoordinator]);
+        if ([confirmation isBeingDismissed] && coordinator != nil) {
+            [coordinator animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+                if (![context isCancelled]) beginPurchase();
+            }];
+        } else [confirmation dismissViewControllerAnimated:YES completion:beginPurchase];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void) buyButtonClicked {
@@ -8641,9 +8858,16 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
     // The purchase is confirmed by the provider; refresh the package state and
     // queue the install. authorize_download re-verifies ownership at fetch time
     // and APT hash/size checks remain enforced.
+    BOOL chooseVersion(purchaseReturnToVersions_);
     [self reloadData];
-    if (package_ != nil)
-        [self.delegate installPackage:package_];
+    if (package_ != nil) {
+        // A purchase grants access to the package, not permission to replace an
+        // explicitly selected older version with the latest one.
+        if (chooseVersion) {
+            purchaseAccess_ = CYCommercialPackageAccessInstall;
+            if ([versions_ count] != 0) [self _clickButtonWithName:@"DOWNGRADE"];
+        } else [self.delegate installPackage:package_];
+    }
 }
 
 - (void) presentPurchaseAction:(NSString *)urlString forPackage:(NSString *)packageID {
@@ -10452,6 +10676,7 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
 /* Changes Controller {{{ */
 @interface ChangesController : FilteredPackageListController {
     size_t upgrades_;
+    _H<CydiaSourceRefreshBar> refreshBar_;
 }
 
 - (id) initWithDatabase:(Database *)database;
@@ -10461,6 +10686,34 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
 @end
 
 @implementation ChangesController
+
+- (BOOL) supportsPullToRefresh {
+    // Reload is the explicit repository action. Pulling this local list should
+    // not insert a spinner or suggest that a second refresh has started.
+    return NO;
+}
+
+- (void) loadView {
+    [super loadView];
+    UIView *view([self view]);
+    refreshBar_ = [[[CydiaSourceRefreshBar alloc] initWithFrame:CGRectZero] autorelease];
+    [refreshBar_ setTranslatesAutoresizingMaskIntoConstraints:NO];
+    [refreshBar_ setIsAccessibilityElement:YES];
+    [refreshBar_ setAccessibilityLabel:CYLocalize(@"Refreshing")];
+    [view addSubview:refreshBar_];
+    [NSLayoutConstraint activateConstraints:@[
+        [[refreshBar_ topAnchor] constraintEqualToAnchor:[[view safeAreaLayoutGuide] topAnchor] constant:2.0f],
+        [[refreshBar_ leadingAnchor] constraintEqualToAnchor:[view leadingAnchor] constant:16.0f],
+        [[refreshBar_ trailingAnchor] constraintEqualToAnchor:[view trailingAnchor] constant:-16.0f],
+        [[refreshBar_ heightAnchor] constraintEqualToConstant:3.0f],
+    ]];
+    [refreshBar_ setRefreshing:[self.delegate updating]];
+}
+
+- (void) releaseSubviews {
+    refreshBar_ = nil;
+    [super releaseSubviews];
+}
 
 - (NSURL *) referrerURL {
     return [NSURL URLWithString:[NSString stringWithFormat:@"%@/#!/changes/", UI_]];
@@ -10517,6 +10770,7 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
 }
 
 - (void) sourceRefreshStateDidChange {
+    [refreshBar_ setRefreshing:[self.delegate updating]];
     [self setLeftBarButtonItem];
     [self refreshUpgradeButton];
     CYRootlessDiag(@"CHANGES", @"UI refresh state active=%d leftAction=%@ upgrades=%zu",
@@ -10574,7 +10828,9 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
 }
 
 - (bool) shouldBlock {
-    return true;
+    // The current snapshot stays visible while the local list is rebuilt.
+    // Network activity is already represented by the repository refresh bar.
+    return false;
 }
 
 - (void) useFilter {
@@ -10607,6 +10863,7 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
 - (void) viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [[self navigationItem] setLargeTitleDisplayMode:UINavigationItemLargeTitleDisplayModeNever];
+    [refreshBar_ setRefreshing:[self.delegate updating]];
     [self setLeftBarButtonItem];
     // The list loads asynchronously. Read the current atomic Database snapshot
     // now so Upgrade is already correct on the first visible frame.
@@ -12206,6 +12463,7 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
     bool sourceRefreshPendingAfterTransaction_;
     _H<NSMutableSet> queuedRequestedIdentifiers_;
     _H<NSArray> queuedOperationsAwaitingReload_;
+    _H<NSMutableArray> preparationErrors_;
 }
 
 - (void) loadData;
@@ -12886,6 +13144,10 @@ _end
 }
 
 - (NSNumber *) prepareDatabaseForConfirmation {
+    // A package action may resolve to no work (for example, clearing the last
+    // queued item). Do not take an archive lock or open an empty Review page.
+    if ([database_ ready] && [database_ cache]->BrokenCount() == 0 && [[database_ transactionPlan] count] == 0)
+        return [NSNumber numberWithBool:NO];
     return [NSNumber numberWithBool:[database_ prepare]];
 }
 
@@ -12952,18 +13214,35 @@ _end
     // Keep the chosen action visible during resolution instead of flashing a
     // full-screen HUD between Modify and Review. Preserve the transaction lock.
     BOOL interactionEnabled([window_ isUserInteractionEnabled]);
+    preparationErrors_ = [NSMutableArray array];
     [window_ setUserInteractionEnabled:NO];
     [self lockSuspend];
     NSNumber *prepared([self yieldToSelector:@selector(prepareDatabaseForConfirmation)]);
     [self unlockSuspend];
     [window_ setUserInteractionEnabled:interactionEnabled];
-    if (![prepared boolValue]) {
-        // prepare() released every archive lock. Keep the explicit plan visible
-        // so it can be retried, edited, or safely refreshed instead of leaving
-        // an invisible half-queue behind.
-        Queuing_ = [effectiveIdentifiers count] != 0;
+    NSString *preparationError([preparationErrors_ componentsJoinedByString:@"\n\n"]);
+    preparationErrors_ = nil;
+    BOOL hasOperations([[database_ transactionPlan] count] != 0);
+    BOOL hasIssues([database_ ready] && [database_ cache]->BrokenCount() != 0);
+    if (![prepared boolValue] || (!hasOperations && !hasIssues)) {
+        // Preparation errors arrive before a ProgressController exists. Show
+        // their reason here, and retain a badge only for a real plan or issue.
+        Queuing_ = (hasOperations || hasIssues) && [effectiveIdentifiers count] != 0;
+        if (!Queuing_) {
+            [queuedRequestedIdentifiers_ removeAllObjects];
+            queuedOperationsAwaitingReload_ = nil;
+        }
         [self _updateDataPreservingVisibleController];
         [self endPackageTransaction];
+        NSString *message([preparationError length] != 0 ? preparationError :
+            (hasOperations || hasIssues ? CYLocalize(@"Review the details before trying again.") : CYLocalize(@"No changes selected")));
+        UIAlertController *alert([UIAlertController alertControllerWithTitle:CYLocalize(@"Package Changes")
+            message:message preferredStyle:UIAlertControllerStyleAlert]);
+        [alert addAction:[UIAlertAction actionWithTitle:CYLocalize(@"OK") style:UIAlertActionStyleDefault handler:nil]];
+        UIViewController *presenter(tabbar_);
+        while ([presenter presentedViewController] != nil)
+            presenter = [presenter presentedViewController];
+        [presenter presentViewController:alert animated:YES completion:nil];
         return false;
     }
 
@@ -13092,23 +13371,30 @@ _end
 
 - (void) perform_ {
     NSSet *requestedIdentifiers;
+    NSArray *requestedOperations;
     @synchronized (self) {
         requestedIdentifiers = [queuedRequestedIdentifiers_ count] == 0 ? nil :
             [[NSSet alloc] initWithSet:queuedRequestedIdentifiers_];
+        requestedOperations = [[database_ transactionOperationsForRequestedIdentifiers:requestedIdentifiers] retain];
     }
-    [database_ performWithRequestedIdentifiers:requestedIdentifiers];
+    CYPackageTransactionResult result([database_ performWithRequestedIdentifiers:requestedIdentifiers]);
+    @synchronized (self) {
+        // A failed download, accepted cancellation or changed dependency plan
+        // has not touched dpkg. Keep explicit intent for the existing queue
+        // restoration path, which requires a new review and confirmation.
+        Queuing_ = result == CYPackageTransactionNotStarted && [requestedOperations count] != 0;
+        queuedOperationsAwaitingReload_ = Queuing_ ? requestedOperations : nil;
+        if (!Queuing_)
+            [queuedRequestedIdentifiers_ removeAllObjects];
+    }
+    [requestedOperations release];
     [requestedIdentifiers release];
-    // Always reload the local database so Package Details, Installed and Changes
-    // reflect the new installed/removed/upgraded state immediately, even when a
-    // respring or reboot is still pending. The package is already committed to
-    // dpkg; a pending restart only applies a tweak's runtime effect. This keeps
-    // the action button correct at once (Install -> Modify, Remove -> Install,
-    // Upgrade -> Modify), matching Sileo and Zebra.
+    // Always refresh installed state in place. Once dpkg has been attempted,
+    // never restore or replay the old queue: even a failed attempt may already
+    // have installed or removed packages. A pending restart only affects their
+    // runtime activation, so Details, Installed and Changes update immediately.
     transactionReloadPending_ = true;
     [self performSelectorOnMainThread:@selector(reloadDataAfterPackageTransaction) withObject:nil waitUntilDone:YES];
-    @synchronized (self) {
-        [queuedRequestedIdentifiers_ removeAllObjects];
-    }
     if (Finish_ != 0 || RestartSubstrate_) {
         // A restart is pending: also mark the cache stale so the post-restart
         // cold launch rebuilds from the live dpkg database.
@@ -13742,6 +14028,16 @@ _trace();
 }
 
 - (void) addProgressEvent:(CydiaProgressEvent *)event forTask:(NSString *)task {
+    if (preparationErrors_ != nil) {
+        if ([[event type] isEqualToString:kCydiaProgressEventTypeError]) {
+            NSString *message(CYRootlessDiagnosticsText(CYLocalize([event message] ?: @"")));
+            if ([message length] != 0 && ![preparationErrors_ containsObject:message])
+                [preparationErrors_ addObject:message];
+        }
+        CYRootlessDiag(@"PROGRESS", @"preparation event retainedForFeedback=1 type=%@ task=%@ message=%@",
+            [event type] ?: @"<nil>", task ?: @"<nil>", CYRootlessDiagnosticsText([event message] ?: @""));
+        return;
+    }
     id<ProgressDelegate> progress([database_ progressDelegate]);
     if (progress == nil) {
         // Startup and Home-button Refresh already expose their live state in
@@ -13862,6 +14158,10 @@ int main(int argc, char *argv[]) {
     }
 
     NSAutoreleasePool *pool([[NSAutoreleasePool alloc] init]);
+
+    // Start reading cached artwork while the remaining application setup runs.
+    // This never waits for images or grants network access to the launch view.
+    CYPrewarmFeaturedBannerArtwork(CYFeaturedProcessBannerRecords(), 3.0f);
 
     _trace();
 

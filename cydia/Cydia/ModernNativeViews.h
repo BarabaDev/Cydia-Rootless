@@ -1,4 +1,4 @@
-/* Cydia 1.1.24 Rootless - complete native iOS 15+ transaction UI */
+/* Cydia 1.1.25 Rootless - complete native iOS 15+ transaction UI */
 
 #ifndef Cydia_ModernNativeViews_H
 #define Cydia_ModernNativeViews_H
@@ -6,6 +6,9 @@
 #import <UIKit/UIKit.h>
 
 BOOL CydiaPrivacyConsentIsAccepted(void);
+// Asynchronously warm at most the first six cached banner images. No network
+// request, UIKit view setup, or wait occurs on the calling thread.
+void CYPrewarmFeaturedBannerArtwork(NSArray *packages, CGFloat scale);
 
 @interface CydiaModernAboutViewController : UIViewController <UITextViewDelegate> {
     UIVisualEffectView *legalNotice_;
@@ -94,6 +97,9 @@ typedef NS_ENUM(NSUInteger, CydiaRestartKind) {
 @interface CydiaModernPackageDetailView : UIView
 
 - (void) setLoading:(BOOL)loading;
+- (void) setCommercial:(BOOL)commercial;
+- (void) setAccountNotice:(NSString *)notice target:(id)target action:(SEL)action;
+- (void) setActionEnabled:(BOOL)enabled;
 - (void) setUnavailableIdentifier:(NSString *)identifier;
 - (void) configureWithIcon:(UIImage *)icon
                       name:(NSString *)name

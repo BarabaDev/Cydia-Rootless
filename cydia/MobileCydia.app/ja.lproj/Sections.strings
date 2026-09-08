@@ -49,3 +49,8 @@
 "WebClips" = "Web クリップ";
 "Widgets" = "ウィジェット";
 "eBooks" = "電子書籍";
+
+/* Canonical section labels used after section alias normalization. */
+"Books" = "書籍";
+"Apps" = "アプリ";
+"Health and Fitness" = "健康とフィットネス";

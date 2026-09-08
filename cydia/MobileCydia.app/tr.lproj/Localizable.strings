@@ -522,3 +522,7 @@
 "WELCOME_TO_CYDIA" = "Cydia™’ya hoş geldiniz";
 "WHO_ARE_YOU" = "Siz Kimsiniz?";
 "YES" = "Evet";
+
+/* Commercial package status. */
+"Modern.Paid package" = "Ücretli paket";
+"Modern.Checking purchase…" = "Satın alma durumu kontrol ediliyor…";

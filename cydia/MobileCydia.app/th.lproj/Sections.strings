@@ -50,3 +50,8 @@
 "WebClips" = "ทางลัดเว็บไซต์";
 "Widgets" = "วิดเจ็ต";
 "eBooks" = "หนังสืออิเล็กทรอนิกส์";
+
+/* Canonical section labels used after section alias normalization. */
+"Books" = "หนังสือ";
+"Apps" = "แอป";
+"Health and Fitness" = "สุขภาพและฟิตเนส";

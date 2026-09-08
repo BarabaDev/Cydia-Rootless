@@ -522,3 +522,7 @@
 "WELCOME_TO_CYDIA" = "歡迎使用 Cydia™";
 "WHO_ARE_YOU" = "您是誰?";
 "YES" = "是";
+
+/* Commercial package status. */
+"Modern.Paid package" = "付費套件";
+"Modern.Checking purchase…" = "正在檢查購買狀態…";

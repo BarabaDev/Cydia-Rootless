@@ -50,3 +50,8 @@
 "WebClips" = "Lối tắt trang web";
 "Widgets" = "Tiện ích màn hình";
 "eBooks" = "Sách điện tử";
+
+/* Canonical section labels used after section alias normalization. */
+"Books" = "Sách";
+"Apps" = "Ứng dụng";
+"Health and Fitness" = "Sức khỏe và thể dục";

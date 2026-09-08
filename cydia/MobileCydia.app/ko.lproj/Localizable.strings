@@ -522,3 +522,7 @@
 "WELCOME_TO_CYDIA" = "Cydia™에 오신 것을 환영합니다";
 "WHO_ARE_YOU" = "사용자 구분 선택";
 "YES" = "예";
+
+/* Commercial package status. */
+"Modern.Paid package" = "유료 패키지";
+"Modern.Checking purchase…" = "구매 상태 확인 중…";

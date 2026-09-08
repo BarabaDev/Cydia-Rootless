@@ -1,4 +1,4 @@
-/* Cydia 1.1.24 Rootless - complete native iOS 15+ transaction UI */
+/* Cydia 1.1.25 Rootless - complete native iOS 15+ transaction UI */
 
 #include "Cydia/ModernLocalization.h"
 #include "Cydia/ModernNativeViews.h"
@@ -532,7 +532,7 @@ static NSAttributedString *CYM3LegalText(NSString *visible) {
     [credits setAxis:UILayoutConstraintAxisVertical];
     [credits setSpacing:9.0f];
 
-    legalCopy_ = [@"Modern Rootless • BarabaDev • 8 September 2026\n\nUnofficial modified edition.\nGNU GPL v3 or later; Cytore: GNU AGPL v3 or later. Component notices included.\nSource: github.com/BarabaDev/Cydia-Rootless" copy];
+    legalCopy_ = [@"Modern Rootless • BarabaDev • 9 September 2026\n\nUnofficial modified edition.\nGNU GPL v3 or later; Cytore: GNU AGPL v3 or later. Component notices included.\nSource: github.com/BarabaDev/Cydia-Rootless" copy];
 
     UIView *legalIconTile([[[UIView alloc] init] autorelease]);
     [legalIconTile setTranslatesAutoresizingMaskIntoConstraints:NO];
@@ -828,6 +828,9 @@ static UIButton *CYM3DestinationButton(NSString *title, NSString *glyph, UIColor
     BOOL launchCacheOnly_;
 }
 - (void) loadBannerIfNeeded;
+- (NSString *) featuredImageURL;
+- (UIImage *) loadedBannerImage;
+- (void) adoptLoadedBannerImage:(UIImage *)image;
 - (id) initWithPackage:(NSDictionary *)package palette:(NSUInteger)palette;
 - (void) featuredBannerDidLoad:(NSNotification *)notification;
 @end
@@ -1026,6 +1029,13 @@ static void CYM3DownloadFeaturedBanner(NSString *imageURL, NSURLRequest *request
         CYM3FinishFeaturedBannerRequest(imageURL, nil);
         return;
     }
+    // Early cache warming creates no URL request and never initializes
+    // CFNetwork. Only a later live card can permit a missing image download.
+    if (request == nil) {
+        NSURL *url([NSURL URLWithString:imageURL]);
+        if (url == nil) { CYM3FinishFeaturedBannerRequest(imageURL, nil); return; }
+        request = [NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReturnCacheDataElseLoad timeoutInterval:15.0];
+    }
     // This chain is shared by looping cards and retains no individual view.
     NSURLSessionDataTask *task([[NSURLSession sharedSession] dataTaskWithRequest:request
         completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -1061,7 +1071,7 @@ static void CYM3DownloadFeaturedBanner(NSString *imageURL, NSURLRequest *request
 }
 
 static void CYM3RequestFeaturedBanner(NSString *imageURL, NSURLRequest *request, CGFloat scale, BOOL allowNetwork) {
-    if (request == nil || [imageURL length] == 0 || [CYM3FeaturedBannerCache() objectForKey:imageURL] != nil)
+    if ((allowNetwork && request == nil) || [imageURL length] == 0 || [CYM3FeaturedBannerCache() objectForKey:imageURL] != nil)
         return;
     @synchronized (CYM3FeaturedBannerRequests()) {
         if (allowNetwork)
@@ -1079,6 +1089,23 @@ static void CYM3RequestFeaturedBanner(NSString *imageURL, NSURLRequest *request,
             });
         }
     });
+}
+
+void CYPrewarmFeaturedBannerArtwork(NSArray *packages, CGFloat scale) {
+    if (![packages isKindOfClass:[NSArray class]]) return;
+    NSMutableSet *seen([NSMutableSet set]);
+    NSUInteger count(MIN((NSUInteger)6, [packages count]));
+    for (NSUInteger index(0); index < count; ++index) {
+        id package([packages objectAtIndex:index]);
+        if (![package isKindOfClass:[NSDictionary class]]) continue;
+        id value([package objectForKey:@"imageURL"]);
+        if (![value isKindOfClass:[NSString class]] || [seen containsObject:value]) continue;
+        NSURL *url([NSURL URLWithString:value]);
+        if (![[[url scheme] lowercaseString] isEqualToString:@"https"] || [[url host] length] == 0 ||
+            [url user] != nil || [url password] != nil) continue;
+        [seen addObject:value];
+        CYM3RequestFeaturedBanner(value, nil, scale, NO);
+    }
 }
 
 @implementation CYM3FeaturedPackageButton
@@ -1134,12 +1161,20 @@ static void CYM3RequestFeaturedBanner(NSString *imageURL, NSURLRequest *request,
         [bannerImage_ setImage:cached];
         [self setNeedsLayout];
     } else {
-        NSURL *url([NSURL URLWithString:imageURL_]);
+        BOOL allowNetwork(!launchCacheOnly_ && CydiaPrivacyConsentIsAccepted());
+        NSURL *url(allowNetwork ? [NSURL URLWithString:imageURL_] : nil);
         NSURLRequest *request(url == nil ? nil : [NSURLRequest requestWithURL:url
             cachePolicy:NSURLRequestReturnCacheDataElseLoad timeoutInterval:15.0]);
-        BOOL allowNetwork(!launchCacheOnly_ && CydiaPrivacyConsentIsAccepted());
         CYM3RequestFeaturedBanner(imageURL_, request, [[UIScreen mainScreen] scale], allowNetwork);
     }
+}
+
+- (NSString *) featuredImageURL { return imageURL_; }
+- (UIImage *) loadedBannerImage { return [bannerImage_ image]; }
+- (void) adoptLoadedBannerImage:(UIImage *)image {
+    if (image == nil || [bannerImage_ image] != nil) return;
+    [UIView performWithoutAnimation:^{ [bannerImage_ setImage:image]; }];
+    [self setNeedsLayout];
 }
 
 - (void) featuredBannerDidLoad:(NSNotification *)notification {
@@ -1150,9 +1185,15 @@ static void CYM3RequestFeaturedBanner(NSString *imageURL, NSURLRequest *request,
         image = [CYM3FeaturedBannerCache() objectForKey:imageURL_];
     if (image == nil || [bannerImage_ image] == image)
         return;
-    [UIView transitionWithView:bannerImage_ duration:0.22
-        options:UIViewAnimationOptionTransitionCrossDissolve | UIViewAnimationOptionAllowUserInteraction
-        animations:^{ [bannerImage_ setImage:image]; } completion:nil];
+    // The first cached/network image should be visible in its next frame,
+    // rather than spending another 220 ms fading in from an empty card.
+    if ([bannerImage_ image] == nil || [self window] == nil) {
+        [UIView performWithoutAnimation:^{ [bannerImage_ setImage:image]; }];
+    } else {
+        [UIView transitionWithView:bannerImage_ duration:0.22
+            options:UIViewAnimationOptionTransitionCrossDissolve | UIViewAnimationOptionAllowUserInteraction
+            animations:^{ [bannerImage_ setImage:image]; } completion:nil];
+    }
     [self setNeedsLayout];
 }
 
@@ -1580,7 +1621,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
         [featuredScroll_ addSubview:featuredStack_];
 
         UILabel *footer(CYM3Label(UIFontTextStyleFootnote, [UIColor secondaryLabelColor], 1));
-        [footer setText:@"Cydia 1.1.24"];
+        [footer setText:@"Cydia 1.1.25"];
         homeVersion_ = footer;
         [footer setTextAlignment:NSTextAlignmentCenter];
 
@@ -1861,6 +1902,23 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
 - (void) continueFeaturedPositionFromView:(CydiaModernHomeView *)home {
     if (home == nil || home == self || featuredCycleWidth_ <= 0.0f)
         return;
+    // Transfer already displayed artwork as well as its position. NSCache may
+    // have evicted an image that the launch cards still retain; the live Home
+    // must not go blank and wait for a second asynchronous disk decode.
+    NSMutableDictionary *artwork([NSMutableDictionary dictionary]);
+    for (CYM3FeaturedPackageButton *card in [home->featuredStack_ arrangedSubviews]) {
+        NSString *url([card featuredImageURL]);
+        UIImage *image([card loadedBannerImage]);
+        if ([url length] != 0 && image != nil) {
+            [artwork setObject:image forKey:url];
+            [CYM3FeaturedBannerCache() setObject:image forKey:url cost:CYM3FeaturedBannerCost(image)];
+        }
+    }
+    for (CYM3FeaturedPackageButton *card in [featuredStack_ arrangedSubviews]) {
+        NSString *url([card featuredImageURL]);
+        if ([url length] != 0)
+            [card adoptLoadedBannerImage:[artwork objectForKey:url]];
+    }
     featuredRebuilding_ = YES;
     [UIView performWithoutAnimation:^{
         [self layoutIfNeeded];
@@ -3458,6 +3516,12 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
     UILabel *identifier_;
     UILabel *summary_;
     UILabel *version_;
+    UIStackView *identityStack_;
+    UIStackView *contentStack_;
+    UIStackView *commercialBadge_;
+    UIVisualEffectView *accountNoticeCard_;
+    UILabel *accountNotice_;
+    UIButton *accountNoticeButton_;
     UIImageView *stateIcon_;
     UIView *stateTile_;
     UILabel *stateTitle_;
@@ -3481,6 +3545,8 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
 - (void) dealloc {
     [actionWidth_ release];
     [identityWidth_ release];
+    [commercialBadge_ release];
+    [accountNoticeCard_ release];
     [super dealloc];
 }
 
@@ -3500,6 +3566,7 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
         [content setAlignment:UIStackViewAlignmentFill];
         [content setSpacing:12.0f];
         [scroll addSubview:content];
+        contentStack_ = content;
 
         UIVisualEffectView *hero(CYM3ContentCard(24.0f));
         icon_ = [[[CydiaSymbolView alloc] init] autorelease];
@@ -3517,6 +3584,24 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
         summary_ = CYM3Label(UIFontTextStyleBody, [UIColor secondaryLabelColor], 0);
 
         UIStackView *identity([[[UIStackView alloc] initWithArrangedSubviews:[NSArray arrayWithObjects:name_, identifier_, version_, nil]] autorelease]);
+        identityStack_ = identity;
+        UIImageView *paidIcon([[[CydiaSymbolView alloc] initWithImage:[UIImage cy_symbolNamed:@"creditcard"]] autorelease]);
+        [paidIcon setTintColor:CYModernCommercialColor()];
+        [paidIcon setPreferredSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:16.0f weight:UIImageSymbolWeightMedium]];
+        [paidIcon setContentMode:UIViewContentModeScaleAspectFit];
+        [paidIcon setTranslatesAutoresizingMaskIntoConstraints:NO];
+        [paidIcon setIsAccessibilityElement:NO];
+        UILabel *paidLabel(CYM3Label(UIFontTextStyleSubheadline, CYModernCommercialColor(), 0));
+        [paidLabel setText:CYLocalize(@"Paid package")];
+        commercialBadge_ = [[UIStackView alloc] initWithArrangedSubviews:@[paidIcon, paidLabel]];
+        [commercialBadge_ setAxis:UILayoutConstraintAxisHorizontal];
+        [commercialBadge_ setAlignment:UIStackViewAlignmentCenter];
+        [commercialBadge_ setSpacing:6.0f];
+        [commercialBadge_ setIsAccessibilityElement:YES];
+        [commercialBadge_ setAccessibilityLabel:CYLocalize(@"Paid package")];
+        [commercialBadge_ setAccessibilityIdentifier:@"CydiaPaidPackageBadge"];
+        [[paidIcon widthAnchor] constraintEqualToConstant:20.0f].active = YES;
+        [[paidIcon heightAnchor] constraintEqualToConstant:20.0f].active = YES;
         [identity setAxis:UILayoutConstraintAxisVertical];
         [identity setAlignment:UIStackViewAlignmentFill];
         [identity setSpacing:3.0f];
@@ -3558,7 +3643,7 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
         [action_ setContentHorizontalAlignment:UIControlContentHorizontalAlignmentCenter];
         [action_ setContentVerticalAlignment:UIControlContentVerticalAlignmentCenter];
         [[action_ titleLabel] setTextAlignment:NSTextAlignmentCenter];
-        [[action_ titleLabel] setLineBreakMode:NSLineBreakByClipping];
+        [[action_ titleLabel] setLineBreakMode:NSLineBreakByWordWrapping];
         [action_ setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
         UIStackView *actionContent([[[UIStackView alloc] initWithArrangedSubviews:[NSArray arrayWithObjects:state, action_, nil]] autorelease]);
         actionContent_ = actionContent;
@@ -3567,6 +3652,31 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
         [actionContent setAlignment:UIStackViewAlignmentCenter];
         [actionContent setSpacing:12.0f];
         [[actionDock contentView] addSubview:actionContent];
+
+        accountNoticeCard_ = [CYM3ContentCard(20.0f) retain];
+        [accountNoticeCard_ setAccessibilityIdentifier:@"CydiaPackageAccountNotice"];
+        accountNotice_ = CYM3Label(UIFontTextStyleBody, [UIColor secondaryLabelColor], 0);
+        accountNoticeButton_ = [CYM3AdaptiveButton buttonWithType:UIButtonTypeSystem];
+        [accountNoticeButton_ setTitle:CYLocalize(@"Manage Account") forState:UIControlStateNormal];
+        [accountNoticeButton_ setImage:[UIImage cy_symbolNamed:@"person.crop.circle"] forState:UIControlStateNormal];
+        [[accountNoticeButton_ titleLabel] setFont:[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline]];
+        [[accountNoticeButton_ titleLabel] setAdjustsFontForContentSizeCategory:YES];
+        [[accountNoticeButton_ titleLabel] setNumberOfLines:0];
+        [[accountNoticeButton_ titleLabel] setTextAlignment:NSTextAlignmentCenter];
+        [accountNoticeButton_ setContentEdgeInsets:UIEdgeInsetsMake(10.0f, 14.0f, 10.0f, 14.0f)];
+        [accountNoticeButton_ setAccessibilityIdentifier:@"CydiaPackageManageAccount"];
+        UIStackView *accountContent([[[UIStackView alloc] initWithArrangedSubviews:@[accountNotice_, accountNoticeButton_]] autorelease]);
+        [accountContent setTranslatesAutoresizingMaskIntoConstraints:NO];
+        [accountContent setAxis:UILayoutConstraintAxisVertical];
+        [accountContent setSpacing:6.0f];
+        [[accountNoticeCard_ contentView] addSubview:accountContent];
+        [NSLayoutConstraint activateConstraints:@[
+            [[accountContent leadingAnchor] constraintEqualToAnchor:[[accountNoticeCard_ contentView] leadingAnchor] constant:14.0f],
+            [[accountContent trailingAnchor] constraintEqualToAnchor:[[accountNoticeCard_ contentView] trailingAnchor] constant:-14.0f],
+            [[accountContent topAnchor] constraintEqualToAnchor:[[accountNoticeCard_ contentView] topAnchor] constant:12.0f],
+            [[accountContent bottomAnchor] constraintEqualToAnchor:[[accountNoticeCard_ contentView] bottomAnchor] constant:-12.0f],
+            [[accountNoticeButton_ heightAnchor] constraintGreaterThanOrEqualToConstant:44.0f]
+        ]];
 
         UILabel *informationTitle(CYM3Label(UIFontTextStyleCaption1, [UIColor secondaryLabelColor], 1));
         [informationTitle setText:CYLocalize(@"PACKAGE INFORMATION")];
@@ -3681,6 +3791,8 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
 }
 
 - (void) setUnavailableIdentifier:(NSString *)identifier {
+    [self setCommercial:NO];
+    [self setAccountNotice:nil target:nil action:NULL];
     [icon_ setImage:[UIImage cy_symbolNamed:@"questionmark.folder.fill"]];
     [icon_ setTintColor:[UIColor systemOrangeColor]];
     [name_ setText:CYLocalize(@"Package unavailable")];
@@ -3744,6 +3856,36 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
     [sectionValue_ setText:[section length] == 0 ? CYLocalize(@"Uncategorized") : section];
     [sizeValue_ setText:[size length] == 0 || [size isEqualToString:@"—"] ? CYLocalize(@"Not provided") : size];
     [self setLoading:NO];
+}
+
+- (void) setCommercial:(BOOL)commercial {
+    if (commercial) {
+        if ([commercialBadge_ superview] == nil)
+            [identityStack_ insertArrangedSubview:commercialBadge_ atIndex:2];
+    } else {
+        [identityStack_ removeArrangedSubview:commercialBadge_];
+        [commercialBadge_ removeFromSuperview];
+    }
+}
+
+- (void) setAccountNotice:(NSString *)notice target:(id)target action:(SEL)action {
+    [accountNotice_ setText:notice];
+    [accountNoticeButton_ removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
+    BOOL actionable(target != nil && action != NULL);
+    [accountNoticeButton_ setEnabled:actionable];
+    if (actionable)
+        [accountNoticeButton_ addTarget:target action:action forControlEvents:UIControlEventTouchUpInside];
+    if ([notice length] != 0) {
+        if ([accountNoticeCard_ superview] == nil)
+            [contentStack_ insertArrangedSubview:accountNoticeCard_ atIndex:2];
+    } else {
+        [contentStack_ removeArrangedSubview:accountNoticeCard_];
+        [accountNoticeCard_ removeFromSuperview];
+    }
+}
+
+- (void) setActionEnabled:(BOOL)enabled {
+    [action_ setEnabled:enabled];
 }
 
 - (UIView *) actionSourceView { return action_; }

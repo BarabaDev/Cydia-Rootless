@@ -522,3 +522,7 @@
 "WELCOME_TO_CYDIA" = "Καλώς ήρθες στο Cydia™";
 "WHO_ARE_YOU" = "Ποιος είσαι;";
 "YES" = "Ναι";
+
+/* Commercial package status. */
+"Modern.Paid package" = "Πακέτο επί πληρωμή";
+"Modern.Checking purchase…" = "Έλεγχος κατάστασης αγοράς…";

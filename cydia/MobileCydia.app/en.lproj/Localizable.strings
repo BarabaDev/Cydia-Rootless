@@ -529,3 +529,7 @@
 "Modern.Upgrade All" = "Upgrade All";
 "Modern.Upgrades" = "Upgrades";
 "Modern.View Cached Packages" = "View Cached Packages";
+
+/* Commercial package status. */
+"Modern.Paid package" = "Paid package";
+"Modern.Checking purchase…" = "Checking purchase…";

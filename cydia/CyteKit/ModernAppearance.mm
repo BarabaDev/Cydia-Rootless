@@ -1,4 +1,4 @@
-/* Cydia 1.1.24 - modern rootless appearance layer for iOS 15+ */
+/* Cydia 1.1.25 - modern rootless appearance layer for iOS 15+ */
 
 #include "CyteKit/UCPlatform.h"
 #include "CyteKit/ModernAppearance.h"

@@ -50,3 +50,8 @@
 "WebClips" = "اختصارات الويب";
 "Widgets" = "الأدوات المصغرة";
 "eBooks" = "الكتب الإلكترونية";
+
+/* Canonical section labels used after section alias normalization. */
+"Books" = "الكتب";
+"Apps" = "التطبيقات";
+"Health and Fitness" = "الصحة واللياقة البدنية";

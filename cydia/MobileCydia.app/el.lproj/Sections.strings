@@ -49,3 +49,8 @@
 "WebClips" = "WebClips";
 "Widgets" = "Μικροεφαρμογές";
 "eBooks" = "Ηλεκτρονικά βιβλία";
+
+/* Canonical section labels used after section alias normalization. */
+"Books" = "Βιβλία";
+"Apps" = "Εφαρμογές";
+"Health and Fitness" = "Υγεία και φυσική κατάσταση";

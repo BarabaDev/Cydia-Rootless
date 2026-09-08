@@ -49,3 +49,8 @@
 "WebClips" = "웹 클립";
 "Widgets" = "위젯";
 "eBooks" = "전자책";
+
+/* Canonical section labels used after section alias normalization. */
+"Books" = "도서";
+"Apps" = "앱";
+"Health and Fitness" = "건강 및 피트니스";

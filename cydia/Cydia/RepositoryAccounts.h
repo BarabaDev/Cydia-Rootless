@@ -63,6 +63,15 @@ FOUNDATION_EXPORT NSDictionary *CYRepositoryPackageInfo(
     NSError **error
 );
 
+/* Classifies a missing or invalid account credential after payment-provider
+ * discovery. Unavailable or unsupported providers do not require sign-in. */
+FOUNDATION_EXPORT BOOL CYRepositoryAccountErrorRequiresSignIn(NSError *error);
+
+/* A repository without the supported HTTPS payment-discovery protocol keeps
+ * its ordinary package actions. Transient failures of that protocol do not
+ * count as unsupported, and this never authorizes a package download. */
+FOUNDATION_EXPORT BOOL CYRepositoryAccountErrorIsUnsupportedProvider(NSError *error);
+
 /* Starts an in-app purchase after device authentication and returns one of the
  * CYRepositoryPurchase* codes. On CYRepositoryPurchaseActionRequired, *actionURL
  * receives a short-lived HTTPS URL to present in ASWebAuthenticationSession

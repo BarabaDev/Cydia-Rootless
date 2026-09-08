@@ -49,3 +49,8 @@
 "WebClips" = "网页快捷方式";
 "Widgets" = "小部件";
 "eBooks" = "电子书";
+
+/* Canonical section labels used after section alias normalization. */
+"Books" = "图书";
+"Apps" = "应用";
+"Health and Fitness" = "健康与健身";

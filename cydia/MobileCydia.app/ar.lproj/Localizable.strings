@@ -523,3 +523,7 @@
 "WELCOME_TO_CYDIA" = "مرحبًا بكم في Cydia™";
 "WHO_ARE_YOU" = "من أنت؟";
 "YES" = "نعم";
+
+/* Commercial package status. */
+"Modern.Paid package" = "حزمة مدفوعة";
+"Modern.Checking purchase…" = "جارٍ التحقق من حالة الشراء…";

@@ -1,4 +1,4 @@
-/* Cydia 1.1.24 Rootless - repository accounts compatible with Sileo's API. */
+/* Cydia 1.1.25 Rootless - repository accounts compatible with Sileo's API. */
 
 #include "Cydia/ModernLocalization.h"
 #include "Cydia/RepositoryAccounts.h"
@@ -27,6 +27,7 @@ enum {
     CYRepositoryAccountErrorNotSignedIn,
     CYRepositoryAccountErrorNotPurchased,
     CYRepositoryAccountErrorKeychain,
+    CYRepositoryAccountErrorUnsupportedProvider,
 };
 
 static NSError *CYAccountError(NSInteger code, NSString *message) {
@@ -36,6 +37,7 @@ static NSError *CYAccountError(NSInteger code, NSString *message) {
 
 static NSString *const CYRepositoryAccountInvalidateKey = @"CYRepositoryInvalidate";
 static NSString *const CYRepositoryAccountRecoveryURLKey = @"CYRepositoryRecoveryURL";
+static NSString *const CYRepositoryAccountHTTPStatusKey = @"CYRepositoryHTTPStatus";
 
 static NSError *CYAccountErrorWithFlags(NSInteger code, NSString *message, BOOL invalidate, NSString *recoveryURL) {
     NSMutableDictionary *info([NSMutableDictionary dictionaryWithObject:(message ?: CYLocalize(@"Repository account error")) forKey:NSLocalizedDescriptionKey]);
@@ -50,6 +52,16 @@ static NSError *CYAccountErrorWithFlags(NSInteger code, NSString *message, BOOL 
 // clear it, exactly as Sileo does, so the next attempt prompts a fresh sign-in.
 static BOOL CYAccountErrorRequestsInvalidation(NSError *error) {
     return [[[error userInfo] objectForKey:CYRepositoryAccountInvalidateKey] boolValue];
+}
+
+BOOL CYRepositoryAccountErrorRequiresSignIn(NSError *error) {
+    return [[error domain] isEqualToString:CYRepositoryAccountErrorDomain] &&
+        ([error code] == CYRepositoryAccountErrorNotSignedIn || CYAccountErrorRequestsInvalidation(error));
+}
+
+BOOL CYRepositoryAccountErrorIsUnsupportedProvider(NSError *error) {
+    return [[error domain] isEqualToString:CYRepositoryAccountErrorDomain] &&
+        [error code] == CYRepositoryAccountErrorUnsupportedProvider;
 }
 
 static BOOL CYValidHTTPSURL(NSURL *url) {
@@ -87,7 +99,7 @@ static NSData *CYRepositoryRequest(NSURL *url, NSString *method, NSDictionary *b
 
     NSMutableURLRequest *request([NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:20.0]);
     [request setHTTPMethod:method ?: @"GET"];
-    [request setValue:@"Cydia/1.1.24" forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"Cydia/1.1.25" forHTTPHeaderField:@"User-Agent"];
     [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
     if (body != nil) {
         NSError *jsonError(nil);
@@ -144,7 +156,9 @@ static NSData *CYRepositoryRequest(NSURL *url, NSString *method, NSDictionary *b
     NSInteger status([(NSHTTPURLResponse *)response statusCode]);
     if (status < 200 || status >= 300) {
         if (error != NULL)
-            *error = CYAccountError(CYRepositoryAccountErrorResponse, [NSString stringWithFormat:CYLocalize(@"The repository account returned HTTP %ld."), (long) status]);
+            *error = [NSError errorWithDomain:CYRepositoryAccountErrorDomain code:CYRepositoryAccountErrorResponse userInfo:@{
+                NSLocalizedDescriptionKey:[NSString stringWithFormat:CYLocalize(@"The repository account returned HTTP %ld."), (long) status],
+                CYRepositoryAccountHTTPStatusKey:@(status)}];
         return nil;
     }
     if ([data length] > 2 * 1024 * 1024) {
@@ -198,7 +212,9 @@ static NSURL *CYRepositoryPaymentProvider(NSString *repositoryURL, NSError **err
     NSURL *repository([NSURL URLWithString:repositoryURL]);
     if (!CYValidHTTPSURL(repository)) {
         if (error != NULL)
-            *error = CYAccountError(CYRepositoryAccountErrorInvalidURL, CYLocalize(@"Paid repositories must use HTTPS."));
+            *error = CYAccountError([[[repository scheme] lowercaseString] isEqualToString:@"http"] && [[repository host] length] != 0 ?
+                CYRepositoryAccountErrorUnsupportedProvider : CYRepositoryAccountErrorInvalidURL,
+                CYLocalize(@"Paid repositories must use HTTPS."));
         return nil;
     }
     NSString *cacheKey([[repository absoluteString]
@@ -209,12 +225,19 @@ static NSURL *CYRepositoryPaymentProvider(NSString *repositoryURL, NSError **err
             return cached;
     }
 
-    NSData *data(CYRepositoryRequest(CYEndpointURL(repository, @"payment_endpoint"), @"GET", nil, error));
-    if (data == nil)
+    NSError *discoveryError(nil);
+    NSData *data(CYRepositoryRequest(CYEndpointURL(repository, @"payment_endpoint"), @"GET", nil, &discoveryError));
+    if (data == nil) {
+        NSInteger status([[[discoveryError userInfo] objectForKey:CYRepositoryAccountHTTPStatusKey] integerValue]);
+        BOOL unsupported([[discoveryError domain] isEqualToString:CYRepositoryAccountErrorDomain] &&
+            [discoveryError code] == CYRepositoryAccountErrorResponse && (status == 404 || status == 410 || status == 501));
+        if (error != NULL)
+            *error = unsupported ? CYAccountError(CYRepositoryAccountErrorUnsupportedProvider, [discoveryError localizedDescription]) : discoveryError;
         return nil;
+    }
     if ([data length] > 2048) {
         if (error != NULL)
-            *error = CYAccountError(CYRepositoryAccountErrorResponse, CYLocalize(@"The payment endpoint is too large."));
+            *error = CYAccountError(CYRepositoryAccountErrorUnsupportedProvider, CYLocalize(@"The payment endpoint is too large."));
         return nil;
     }
     NSString *text([[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease]);
@@ -222,7 +245,7 @@ static NSURL *CYRepositoryPaymentProvider(NSString *repositoryURL, NSError **err
     NSURL *provider([NSURL URLWithString:text]);
     if (!CYValidHTTPSURL(provider)) {
         if (error != NULL)
-            *error = CYAccountError(CYRepositoryAccountErrorInvalidURL, CYLocalize(@"The payment provider must use HTTPS."));
+            *error = CYAccountError(CYRepositoryAccountErrorUnsupportedProvider, CYLocalize(@"The payment provider must use HTTPS."));
         return nil;
     }
     @synchronized (CYRepositoryPaymentProviderCache()) {

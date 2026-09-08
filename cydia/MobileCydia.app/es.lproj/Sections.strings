@@ -49,3 +49,8 @@
 "WebClips" = "Accesos web";
 "Widgets" = "Widgets";
 "eBooks" = "Libros electrónicos";
+
+/* Canonical section labels used after section alias normalization. */
+"Books" = "Libros";
+"Apps" = "Aplicaciones";
+"Health and Fitness" = "Salud y forma física";

@@ -50,3 +50,8 @@
 "WebClips" = "קיצורי דרך לאתרים";
 "Widgets" = "וידג׳טים";
 "eBooks" = "ספרים אלקטרוניים";
+
+/* Canonical section labels used after section alias normalization. */
+"Books" = "ספרים";
+"Apps" = "יישומים";
+"Health and Fitness" = "בריאות וכושר";

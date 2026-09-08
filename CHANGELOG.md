@@ -1,3 +1,17 @@
+# Cydia 1.1.25
+
+Reliability and repository-account update by BarabaDev on **9 September 2026**.
+
+- Cached Home banner artwork starts loading during application setup and transfers directly to the live carousel. The first available image appears without a fade; existing artwork and carousel position remain visible during the handoff.
+- Changes uses a thin refresh activity bar instead of a pull-to-refresh spinner. Reload, cancellation and completion share the source-refresh state; Sources keeps its completion indicators.
+- Paid packages show a credit-card symbol and a spoken paid-package label. Package Details offers Sign In, Buy, Install or Retry according to the repository response, with a direct link to its account screen.
+- Commercial download choices respect the same account state in Modify and version-selection menus while Clear and Remove remain available. Unsupported account APIs keep the existing package actions and display an explanation; download authorization is still enforced.
+- Preparation failures display their reason instead of silently leaving an empty review. Empty queues no longer show a queued badge; unresolved dependency issues remain reviewable.
+- A transaction that stops before installation retains the user's selections for retry. A partially attempted installation is never replayed automatically.
+- Completed the Books, Apps and Health and Fitness category translations and added the new paid-package messages in all 21 existing localizations.
+
+The package version is `1.1.25` and the architecture is `iphoneos-arm64`.
+
 # Cydia 1.1.24
 
 Banner visibility update by BarabaDev on **8 September 2026**.

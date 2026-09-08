@@ -5,15 +5,15 @@ cd "$(dirname "$0")"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 ok() { printf 'OK: %s\n' "$*"; }
 
-expected="1.1.24"
+expected="1.1.25"
 pinned="e4718f05d049c1a09fb9662cc3db2d4c5122defe"
 
-echo "== Cydia 1.1.24 clean rootless source audit =="
+echo "== Cydia 1.1.25 clean rootless source audit =="
 
 [[ "$(./version.sh)" == "$expected" ]] || fail "package version is not $expected"
 grep -Fxq "#define CYDIA_VERSION \"$expected\"" Version.h || fail "compiled version header differs"
-grep -A1 '<key>CFBundleShortVersionString</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.24</string>' || fail "app public version is not 1.1.24"
-grep -A1 '<key>CFBundleVersion</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.24</string>' || fail "app build number is not the final release version 1.1.24"
+grep -A1 '<key>CFBundleShortVersionString</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.25</string>' || fail "app public version is not 1.1.25"
+grep -A1 '<key>CFBundleVersion</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.25</string>' || fail "app build number is not the final release version 1.1.25"
 ! grep -E '^Depends:.*cydia-lproj' cydia.control >/dev/null || fail "obsolete separate translation dependency remains"
 grep -Fq 'Replaces: cydia-lproj (<= 1.1.22)' cydia.control || fail "safe merged-translation replacement rule is missing"
 grep -Fq 'Conflicts: cydia-lproj (<= 1.1.22)' cydia.control || fail "old translation package is not removed during migration"
@@ -30,6 +30,12 @@ for locale in "${locales[@]}"; do
 done
 for locale in ar de el es fr he it ja ko nl pl pt-PT pt ru sv th tr vi zh-Hans zh-Hant; do
     [[ -f "MobileCydia.app/$locale.lproj/Sections.strings" ]] || fail "missing section localization source: $locale"
+    section_count="$(grep -c '^".*" = ' "MobileCydia.app/$locale.lproj/Sections.strings")"
+    [[ "$section_count" == 54 ]] || fail "expected 54 canonical section labels for $locale, found $section_count"
+    for section_label in 'Books' 'Apps' 'Health and Fitness'; do
+        grep -Fq "\"$section_label\" = " "MobileCydia.app/$locale.lproj/Sections.strings" || \
+            fail "missing canonical section label $section_label for $locale"
+    done
 done
 [[ ! -e MobileCydia.app/en.lproj/Sections_.strings ]] || fail "unused English section template remains"
 [[ ! -e MobileCydia.app/en.lproj/Sections.strings ]] || fail "redundant English identity section table remains"
@@ -122,8 +128,8 @@ ok "minimal pinned Bingner APT inputs are complete"
 # transport contract must already exist in the compiled http.cc itself.  Audit
 # the implementation rather than trusting a diagnostic string in the app.
 http_method="apt64/methods/http.cc"
-[[ "$(grep -Fc 'CFSTR("Cydia/1.1.24")' "$http_method")" -eq 1 ]] || \
-    fail "embedded HTTPS method does not contain exactly one Cydia/1.1.24 User-Agent"
+[[ "$(grep -Fc 'CFSTR("Cydia/1.1.25")' "$http_method")" -eq 1 ]] || \
+    fail "embedded HTTPS method does not contain exactly one Cydia/1.1.25 User-Agent"
 ! grep -Fq 'Telesphoreo APT-HTTP/1.0.592' "$http_method" || \
     fail "obsolete Telesphoreo package User-Agent remains in compiled source"
 for header in \
@@ -371,7 +377,7 @@ grep -Fq '[heroTitle setText:CYLocalize(@"Welcome to Cydia™")]' Cydia/ModernNa
 grep -Fq 'by Jay Freeman (saurik)' Cydia/ModernNativeViews.mm || fail "original author attribution is missing"
 ! grep -Fq 'heroSubtitle' Cydia/ModernNativeViews.mm || fail "removed Modern Rootless hero label remains"
 ! grep -Fq 'heroDetail' Cydia/ModernNativeViews.mm || fail "removed upper version label remains"
-grep -Fq '[footer setText:@"Cydia 1.1.24"]' Cydia/ModernNativeViews.mm || fail "Home footer version is missing"
+grep -Fq '[footer setText:@"Cydia 1.1.25"]' Cydia/ModernNativeViews.mm || fail "Home footer version is missing"
 ! grep -Fq 'Rootless edition by BarabaDev' Cydia/ModernNativeViews.mm || fail "removed footer credit remains"
 grep -Fq 'CYM3DestinationButton(@"Cydia", @"f"' Cydia/ModernNativeViews.mm || fail "Facebook destination is missing"
 grep -Fq 'CYM3DestinationButton(@"saurik", @"𝕏"' Cydia/ModernNativeViews.mm || fail "saurik social destination is missing"
@@ -470,7 +476,7 @@ cmp -s apt64/COPYING.GPL MobileCydia.app/Licenses/GPL-2.0.txt || fail "APT GPL t
 grep -Fq 'GNU AFFERO GENERAL PUBLIC LICENSE' MobileCydia.app/Licenses/AGPL-3.0.txt || fail "Cytore AGPL text is missing"
 grep -Fq 'Nicolai M. Josuttis 2001' MobileCydia.app/Licenses/NOTICES.txt || fail "Component attribution notices are missing"
 ! grep -Fq 'legalRevealTimer_' Cydia/ModernNativeViews.mm || fail "About still delays license visibility"
-grep -Fq 'legalCopy_ = [@"Modern Rootless • BarabaDev • 8 September 2026' Cydia/ModernNativeViews.mm || fail "About license card does not identify the modified release"
+grep -Fq 'legalCopy_ = [@"Modern Rootless • BarabaDev • 9 September 2026' Cydia/ModernNativeViews.mm || fail "About license card does not identify the modified release"
 ! grep -Fq 'legalCopy_ = [@"Cydia by Jay Freeman' Cydia/ModernNativeViews.mm || fail "About license animation duplicates the original Cydia attribution"
 grep -Fq 'NSLinkAttributeName' Cydia/ModernNativeViews.mm || fail "About source address is not an interactive link"
 grep -Fq 'https://github.com/BarabaDev/Cydia-Rootless' Cydia/ModernNativeViews.mm || fail "About source link has no safe HTTPS destination"
@@ -733,7 +739,14 @@ grep -Fq 'prepare cleanup archiveLockReleased=1 packageManagerReleased=1' Mobile
 grep -Fq 'transactionOperationsForRequestedIdentifiers' MobileCydia.mm || fail "explicit package operations cannot be snapshotted across an APT reload"
 grep -Fq 'restoreTransactionOperations:queuedOperations title:@"Package Queue"' MobileCydia.mm || fail "source refresh can still discard a continued package queue"
 grep -Fq 'Queuing_ = queueRestored;' MobileCydia.mm || fail "queue UI state is not derived from successfully restored operations"
-grep -Fq 'Queuing_ = [effectiveIdentifiers count] != 0;' MobileCydia.mm || fail "failed preparation still leaves an invisible half-queue"
+grep -Fq 'Queuing_ = (hasOperations || hasIssues) && [effectiveIdentifiers count] != 0;' MobileCydia.mm || fail "failed preparation queue badge is not derived from modeled operations or unresolved issues"
+grep -Fq 'if (![prepared boolValue] || (!hasOperations && !hasIssues))' MobileCydia.mm || fail "empty package plans can still open Review"
+grep -Fq 'queuedOperationsAwaitingReload_ = nil;' MobileCydia.mm || fail "empty package plans cannot clear retained queue intent"
+grep -Fq 'preparationErrors_ = [NSMutableArray array];' MobileCydia.mm || fail "preparation cannot retain errors before Progress exists"
+grep -Fq '[preparationErrors_ addObject:message]' MobileCydia.mm || fail "preparation errors are not collected for visible feedback"
+grep -Fq 'message:message preferredStyle:UIAlertControllerStyleAlert' MobileCydia.mm || fail "failed preparation has no visible error presentation"
+grep -Fq 'Queuing_ = result == CYPackageTransactionNotStarted && [requestedOperations count] != 0;' MobileCydia.mm || fail "precommit failure does not preserve explicit reviewable intent"
+grep -Fq 'CYPackageTransactionAttempted' MobileCydia.mm || fail "partial package commits are not distinguished from untouched queues"
 ok "atomic source persistence, queue preservation and serialized recoverable dpkg commit"
 
 grep -Fq 'Cache("dpkg-transaction.incomplete")' MobileCydia.mm || fail "persistent dpkg crash marker is missing"

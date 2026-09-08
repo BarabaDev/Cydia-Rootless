@@ -522,3 +522,7 @@
 "WELCOME_TO_CYDIA" = "Cydia™ へようこそ";
 "WHO_ARE_YOU" = "ユーザー情報";
 "YES" = "はい";
+
+/* Commercial package status. */
+"Modern.Paid package" = "有料パッケージ";
+"Modern.Checking purchase…" = "購入状況を確認中…";
