@@ -1,4 +1,4 @@
-/* Cydia 1.1.23 Rootless - complete native iOS 15+ transaction UI */
+/* Cydia 1.1.24 Rootless - complete native iOS 15+ transaction UI */
 
 #include "Cydia/ModernLocalization.h"
 #include "Cydia/ModernNativeViews.h"
@@ -6,6 +6,7 @@
 #include "CyteKit/ModernAppearance.h"
 #include "Version.h"
 #import <QuartzCore/QuartzCore.h>
+#import <ImageIO/ImageIO.h>
 
 static UILabel *CYM3Label(UIFontTextStyle style, UIColor *color, NSInteger lines) {
     UILabel *label([[[UILabel alloc] init] autorelease]);
@@ -900,16 +901,51 @@ static void CYM3PersistFeaturedBanner(NSString *imageURL, NSData *data) {
 static UIImage *CYM3DecodeFeaturedBanner(NSData *data, CGFloat scale) {
     if ([data length] == 0 || [data length] > 5 * 1024 * 1024)
         return nil;
-    UIImage *image([UIImage imageWithData:data scale:scale]);
-    CGSize size([image size]);
-    CGFloat width(size.width * [image scale]), height(size.height * [image scale]);
-    // A small compressed file can still describe an enormous bitmap. Bound
-    // preparation to 4 megapixels (16 MiB RGBA), well above the banner viewport.
-    if (!isfinite(width) || !isfinite(height) || size.width < 2.0f || size.height < 2.0f ||
-        width < 2.0f || height < 2.0f || width > 8192.0f || height > 8192.0f || width * height > 4.0f * 1024.0f * 1024.0f)
+    CGFloat displayScale(isfinite(scale) && scale > 0.0f ? MIN(scale, 3.0f) : 1.0f);
+    NSDictionary *sourceOptions(@{(NSString *)kCGImageSourceShouldCache: @NO});
+    CGImageSourceRef source(CGImageSourceCreateWithData((CFDataRef)data, (CFDictionaryRef)sourceOptions));
+    if (source == NULL)
         return nil;
-    // Decoding on this worker prevents the first image draw from stalling Home.
-    return [image imageByPreparingForDisplay] ?: image;
+    NSDictionary *properties((NSDictionary *)CGImageSourceCopyPropertiesAtIndex(source, 0, NULL));
+    double width([[properties objectForKey:(NSString *)kCGImagePropertyPixelWidth] doubleValue]);
+    double height([[properties objectForKey:(NSString *)kCGImagePropertyPixelHeight] doubleValue]);
+    NSInteger orientation([[properties objectForKey:(NSString *)kCGImagePropertyOrientation] integerValue]);
+    [properties release];
+    // Curated artwork may be much larger than the card (Bohemic is 4096 x 2589).
+    // Validate source metadata, then decode a bounded thumbnail, never the full bitmap.
+    if (!isfinite(width) || !isfinite(height) || width < 2.0 || height < 2.0 ||
+        width > 32768.0 || height > 32768.0 || width * height > 100.0 * 1024.0 * 1024.0) {
+        CFRelease(source);
+        return nil;
+    }
+    if (orientation >= 5 && orientation <= 8) {
+        double swap(width); width = height; height = swap;
+    }
+    double ratio(MIN(1.0, MAX(263.0 * displayScale / width, 148.0 * displayScale / height)));
+    NSUInteger maxDimension((NSUInteger)MAX(2.0, MIN(1536.0, ceil(MAX(width, height) * ratio))));
+    NSDictionary *thumbnailOptions(@{
+        (NSString *)kCGImageSourceCreateThumbnailFromImageAlways: @YES,
+        (NSString *)kCGImageSourceCreateThumbnailWithTransform: @YES,
+        (NSString *)kCGImageSourceShouldCacheImmediately: @YES,
+        (NSString *)kCGImageSourceThumbnailMaxPixelSize: @(maxDimension)
+    });
+    CGImageRef thumbnail(CGImageSourceCreateThumbnailAtIndex(source, 0, (CFDictionaryRef)thumbnailOptions));
+    CFRelease(source);
+    if (thumbnail == NULL)
+        return nil;
+    size_t decodedWidth(CGImageGetWidth(thumbnail)), decodedHeight(CGImageGetHeight(thumbnail));
+    UIImage *image(nil);
+    if (decodedWidth >= 2 && decodedHeight >= 2 && decodedWidth <= 1536 && decodedHeight <= 1536)
+        image = [UIImage imageWithCGImage:thumbnail scale:displayScale orientation:UIImageOrientationUp];
+    CGImageRelease(thumbnail);
+    return image;
+}
+
+static NSUInteger CYM3FeaturedBannerCost(UIImage *image) {
+    CGImageRef bitmap([image CGImage]);
+    size_t rowBytes(bitmap == NULL ? 0 : CGImageGetBytesPerRow(bitmap));
+    size_t height(bitmap == NULL ? 0 : CGImageGetHeight(bitmap));
+    return height == 0 || rowBytes > NSUIntegerMax / height ? 0 : rowBytes * height;
 }
 
 static UIImage *CYM3CachedFeaturedBanner(NSString *imageURL, CGFloat scale) {
@@ -922,7 +958,7 @@ static UIImage *CYM3CachedFeaturedBanner(NSString *imageURL, CGFloat scale) {
         options:NSDataReadingMappedIfSafe error:NULL]);
     image = CYM3DecodeFeaturedBanner(data, scale);
     if (image != nil)
-        [CYM3FeaturedBannerCache() setObject:image forKey:imageURL cost:[data length]];
+        [CYM3FeaturedBannerCache() setObject:image forKey:imageURL cost:CYM3FeaturedBannerCost(image)];
     return image;
 }
 
@@ -932,7 +968,96 @@ static void CYM3FinishFeaturedBannerRequest(NSString *imageURL, UIImage *image) 
         [CYM3FeaturedBannerNetworkRequests() removeObject:imageURL];
     }
     if (image != nil)
-        [[NSNotificationCenter defaultCenter] postNotificationName:CYM3FeaturedBannerDidLoadNotification object:imageURL];
+        [[NSNotificationCenter defaultCenter] postNotificationName:CYM3FeaturedBannerDidLoadNotification
+            object:imageURL userInfo:@{@"image":image}];
+}
+
+static BOOL CYM3FeaturedResponseNeedsCacheRefresh(NSData *data) {
+    if ([data length] == 0) return YES;
+    if ([data length] > 5 * 1024 * 1024) return NO;
+    // Inspect encoded metadata only. Valid artwork rejected by the decoder's
+    // resource limits must not cause repeated network downloads.
+    CGImageSourceRef source(CGImageSourceCreateWithData((CFDataRef)data,
+        (CFDictionaryRef)@{(NSString *)kCGImageSourceShouldCache:@NO}));
+    BOOL invalid(source == NULL || CGImageSourceGetCount(source) == 0 ||
+        CGImageSourceGetStatusAtIndex(source, 0) != kCGImageStatusComplete);
+    if (source != NULL) CFRelease(source);
+    return invalid;
+}
+
+static NSTimeInterval CYM3FeaturedRetryDelay(NSError *error, NSHTTPURLResponse *response, NSUInteger retry) {
+    BOOL transient(NO);
+    if ([[error domain] isEqualToString:NSURLErrorDomain]) {
+        switch ([error code]) {
+            case NSURLErrorTimedOut:
+            case NSURLErrorNotConnectedToInternet:
+            case NSURLErrorNetworkConnectionLost:
+            case NSURLErrorCannotFindHost:
+            case NSURLErrorCannotConnectToHost:
+            case NSURLErrorDNSLookupFailed:
+                transient = YES;
+        }
+    } else if (error == nil) {
+        NSInteger status([response statusCode]);
+        transient = status == 408 || status == 429 || status == 500 || status == 502 || status == 503 || status == 504;
+    }
+    if (!transient) return -1.0;
+    NSTimeInterval delay(retry == 0 ? 0.6 : 1.5);
+    NSString *retryAfter([response valueForHTTPHeaderField:@"Retry-After"]);
+    if ([retryAfter length] != 0) {
+        double seconds(0);
+        NSScanner *scanner([NSScanner scannerWithString:retryAfter]);
+        // A longer or date-form server delay is left for a later user retry;
+        // never send an automatic retry earlier than the server requested.
+        if (![scanner scanDouble:&seconds] || ![scanner isAtEnd] || !isfinite(seconds) || seconds < 0 || seconds > 15)
+            return -1.0;
+        delay = MAX(delay, seconds);
+    }
+    return delay;
+}
+
+static void CYM3DownloadFeaturedBanner(NSString *imageURL, NSURLRequest *request, CGFloat scale, NSUInteger retry, BOOL refreshedInvalidCache) {
+    BOOL download(NO);
+    @synchronized (CYM3FeaturedBannerRequests()) {
+        download = [CYM3FeaturedBannerRequests() containsObject:imageURL] &&
+            [CYM3FeaturedBannerNetworkRequests() containsObject:imageURL];
+    }
+    if (!download || !CydiaPrivacyConsentIsAccepted()) {
+        CYM3FinishFeaturedBannerRequest(imageURL, nil);
+        return;
+    }
+    // This chain is shared by looping cards and retains no individual view.
+    NSURLSessionDataTask *task([[NSURLSession sharedSession] dataTaskWithRequest:request
+        completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+            NSHTTPURLResponse *http([response isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)response : nil);
+            UIImage *image(error == nil && [http statusCode] == 200 ? CYM3DecodeFeaturedBanner(data, scale) : nil);
+            if (image != nil) {
+                [CYM3FeaturedBannerCache() setObject:image forKey:imageURL cost:CYM3FeaturedBannerCost(image)];
+                // Deliver the retained image itself before cache maintenance.
+                dispatch_async(dispatch_get_main_queue(), ^{ CYM3FinishFeaturedBannerRequest(imageURL, image); });
+                CYM3PersistFeaturedBanner(imageURL, data);
+                NSCachedURLResponse *persisted([[[NSCachedURLResponse alloc]
+                    initWithResponse:response data:data userInfo:nil storagePolicy:NSURLCacheStorageAllowed] autorelease]);
+                [[NSURLCache sharedURLCache] storeCachedResponse:persisted forRequest:request];
+                return;
+            }
+            BOOL invalidBody(error == nil && [http statusCode] == 200 && CYM3FeaturedResponseNeedsCacheRefresh(data));
+            if (invalidBody)
+                [[NSURLCache sharedURLCache] removeCachedResponseForRequest:request];
+            NSTimeInterval delay(CYM3FeaturedRetryDelay(error, http, retry));
+            if (invalidBody && !refreshedInvalidCache) delay = 0.6;
+            if (retry >= 2 || delay < 0.0 || (invalidBody && refreshedInvalidCache)) {
+                dispatch_async(dispatch_get_main_queue(), ^{ CYM3FinishFeaturedBannerRequest(imageURL, nil); });
+                return;
+            }
+            NSMutableURLRequest *fresh([request mutableCopy]);
+            [fresh setCachePolicy:NSURLRequestReloadIgnoringLocalCacheData];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                CYM3DownloadFeaturedBanner(imageURL, fresh, scale, retry + 1, refreshedInvalidCache || invalidBody);
+            });
+            [fresh release];
+        }]);
+    [task resume];
 }
 
 static void CYM3RequestFeaturedBanner(NSString *imageURL, NSURLRequest *request, CGFloat scale, BOOL allowNetwork) {
@@ -949,37 +1074,8 @@ static void CYM3RequestFeaturedBanner(NSString *imageURL, NSURLRequest *request,
         @autoreleasepool {
             UIImage *cached(CYM3CachedFeaturedBanner(imageURL, scale));
             dispatch_async(dispatch_get_main_queue(), ^{
-                if (cached != nil) {
-                    CYM3FinishFeaturedBannerRequest(imageURL, cached);
-                    return;
-                }
-                BOOL download(NO);
-                @synchronized (CYM3FeaturedBannerRequests()) {
-                    download = [CYM3FeaturedBannerNetworkRequests() containsObject:imageURL];
-                }
-                if (!download || !CydiaPrivacyConsentIsAccepted()) {
-                    CYM3FinishFeaturedBannerRequest(imageURL, nil);
-                    return;
-                }
-                // The request is shared by all looping cards, and retains no
-                // individual card or Home view while a server is slow.
-                NSURLSessionDataTask *task([[NSURLSession sharedSession] dataTaskWithRequest:request
-                    completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                        NSHTTPURLResponse *http([response isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)response : nil);
-                        UIImage *image(error == nil && [http statusCode] == 200 ? CYM3DecodeFeaturedBanner(data, scale) : nil);
-                        if (image != nil)
-                            [CYM3FeaturedBannerCache() setObject:image forKey:imageURL cost:[data length]];
-                        // Publish before persistence; disk/cache maintenance must
-                        // not delay an already downloaded banner from appearing.
-                        dispatch_async(dispatch_get_main_queue(), ^{ CYM3FinishFeaturedBannerRequest(imageURL, image); });
-                        if (image != nil) {
-                            CYM3PersistFeaturedBanner(imageURL, data);
-                            NSCachedURLResponse *persisted([[[NSCachedURLResponse alloc]
-                                initWithResponse:response data:data userInfo:nil storagePolicy:NSURLCacheStorageAllowed] autorelease]);
-                            [[NSURLCache sharedURLCache] storeCachedResponse:persisted forRequest:request];
-                        }
-                    }]);
-                [task resume];
+                if (cached != nil) CYM3FinishFeaturedBannerRequest(imageURL, cached);
+                else CYM3DownloadFeaturedBanner(imageURL, request, scale, 0, NO);
             });
         }
     });
@@ -1049,7 +1145,9 @@ static void CYM3RequestFeaturedBanner(NSString *imageURL, NSURLRequest *request,
 - (void) featuredBannerDidLoad:(NSNotification *)notification {
     if (![[notification object] isEqualToString:imageURL_])
         return;
-    UIImage *image([CYM3FeaturedBannerCache() objectForKey:imageURL_]);
+    UIImage *image([[notification userInfo] objectForKey:@"image"]);
+    if (![image isKindOfClass:[UIImage class]])
+        image = [CYM3FeaturedBannerCache() objectForKey:imageURL_];
     if (image == nil || [bannerImage_ image] == image)
         return;
     [UIView transitionWithView:bannerImage_ duration:0.22
@@ -1482,7 +1580,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
         [featuredScroll_ addSubview:featuredStack_];
 
         UILabel *footer(CYM3Label(UIFontTextStyleFootnote, [UIColor secondaryLabelColor], 1));
-        [footer setText:@"Cydia 1.1.23"];
+        [footer setText:@"Cydia 1.1.24"];
         homeVersion_ = footer;
         [footer setTextAlignment:NSTextAlignmentCenter];
 
@@ -1803,6 +1901,8 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
 }
 
 - (void) resumeFeaturedMotion {
+    if ([self window] != nil)
+        [self loadFeaturedArtwork];
     // Start forward from the same visible artwork; never replay a previous
     // reverse throw or count time spent outside the app as animation time.
     featuredTravelVelocity_ = 14.0f;
@@ -1907,8 +2007,10 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
 
 - (void) didMoveToWindow {
     [super didMoveToWindow];
-    if ([self window] != nil)
+    if ([self window] != nil) {
+        [self loadFeaturedArtwork];
         [self startFeaturedTicker];
+    }
 }
 
 - (void) willMoveToWindow:(UIWindow *)newWindow {

@@ -225,17 +225,17 @@ else
     dpkg-deb -x Cydia.deb "$tmppayload"
 fi
 [[ -f "$packaged_plist" ]] || fail "packaged Cydia.app Info.plist is missing"
-grep -A1 '<key>CFBundleShortVersionString</key>' "$packaged_plist" | grep -Fq '<string>1.1.23</string>' || \
-    fail "packaged Cydia.app public version is not 1.1.23"
-grep -A1 '<key>CFBundleVersion</key>' "$packaged_plist" | grep -Fq '<string>1.1.23</string>' || \
-    fail "packaged Cydia.app does not select final bundle version 1.1.23"
+grep -A1 '<key>CFBundleShortVersionString</key>' "$packaged_plist" | grep -Fq '<string>1.1.24</string>' || \
+    fail "packaged Cydia.app public version is not 1.1.24"
+grep -A1 '<key>CFBundleVersion</key>' "$packaged_plist" | grep -Fq '<string>1.1.24</string>' || \
+    fail "packaged Cydia.app does not select final bundle version 1.1.24"
 ! grep -Fq '<key>UIUserInterfaceStyle</key>' "$packaged_plist" || \
     fail "packaged Cydia.app still forces a fixed interface style"
 grep -A1 '<key>UILaunchStoryboardName</key>' "$packaged_plist" | grep -Fq '<string>LaunchScreen</string>' || \
     fail "packaged Cydia.app does not select the adaptive native launch screen"
 ! grep -Fq '<key>UILaunchImages</key>' "$packaged_plist" || \
     fail "packaged Cydia.app still selects legacy fixed-size launch images"
-echo "[ok] packaged Cydia.app is public version 1.1.23, final bundle version 1.1.23, with automatic Light/Dark appearance"
+echo "[ok] packaged Cydia.app is public version 1.1.24, final bundle version 1.1.24, with automatic Light/Dark appearance"
 
 if ! grep -Eq '^-rwsr-sr-x .* \./var/jb/usr/libexec/cydia/cydo$' <<<"$contents"; then
     echo "$contents" | grep '/var/jb/usr/libexec/cydia/cydo$' || true
@@ -249,10 +249,14 @@ if grep -Eq 'rm[[:space:]]+-rf[[:space:]]+/User|ln[[:space:]].*[[:space:]]/User(
     fail "legacy /User rootfs mutation is present in firmware.sh"
 fi
 echo "[ok] firmware metadata refresh does not mutate legacy /User/rootfs"
-for runtime_script in firmware.sh startup move.sh free.sh finish.sh; do
+for runtime_script in firmware.sh startup finish.sh asuser; do
     grep -Fq "./var/jb/usr/libexec/cydia/${runtime_script}" <<<"$contents" || fail "missing runtime helper: ${runtime_script}"
 done
 echo "[ok] expected Cydia runtime helper scripts are packaged"
+for retired_script in free.sh move.sh; do
+    ! grep -Fq "./var/jb/usr/libexec/cydia/${retired_script}" <<<"$contents" || fail "retired rootful stashing helper is packaged: ${retired_script}"
+done
+echo "[ok] retired rootful stashing helpers are absent"
 if grep -E ' -> /(Applications|Library|usr|etc|bin|sbin)(/|$)' <<<"$contents"; then
     fail "package contains a symlink targeting a rootful jailbreak path"
 fi

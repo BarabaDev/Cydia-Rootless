@@ -5,15 +5,15 @@ cd "$(dirname "$0")"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 ok() { printf 'OK: %s\n' "$*"; }
 
-expected="1.1.23"
+expected="1.1.24"
 pinned="e4718f05d049c1a09fb9662cc3db2d4c5122defe"
 
-echo "== Cydia 1.1.23 clean rootless source audit =="
+echo "== Cydia 1.1.24 clean rootless source audit =="
 
 [[ "$(./version.sh)" == "$expected" ]] || fail "package version is not $expected"
 grep -Fxq "#define CYDIA_VERSION \"$expected\"" Version.h || fail "compiled version header differs"
-grep -A1 '<key>CFBundleShortVersionString</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.23</string>' || fail "app public version is not 1.1.23"
-grep -A1 '<key>CFBundleVersion</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.23</string>' || fail "app build number is not the final release version 1.1.23"
+grep -A1 '<key>CFBundleShortVersionString</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.24</string>' || fail "app public version is not 1.1.24"
+grep -A1 '<key>CFBundleVersion</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.24</string>' || fail "app build number is not the final release version 1.1.24"
 ! grep -E '^Depends:.*cydia-lproj' cydia.control >/dev/null || fail "obsolete separate translation dependency remains"
 grep -Fq 'Replaces: cydia-lproj (<= 1.1.22)' cydia.control || fail "safe merged-translation replacement rule is missing"
 grep -Fq 'Conflicts: cydia-lproj (<= 1.1.22)' cydia.control || fail "old translation package is not removed during migration"
@@ -69,6 +69,10 @@ grep -Fq 'Architecture: iphoneos-arm64' cydia.control || fail "main package is n
 grep -Fq 'firmware (>= 15.0)' cydia.control || fail "iOS 15 minimum is missing"
 grep -Fq 'rootless_prefix := /var/jb' makefile.ondevice || fail "rootless prefix is missing"
 grep -Fq 'flag64 += -miphoneos-version-min=15.0' makefile.ondevice || fail "arm64 iOS 15 target is missing"
+for retired_helper in free.sh move.sh; do
+    [[ ! -e "Library/$retired_helper" ]] || fail "unused rootful stashing helper remains: $retired_helper"
+done
+! grep -Eq 'StashController|@selector\(stash\)|/libexec/cydia/(free|move)[.]sh|#define Stash_' MobileCydia.mm || fail "retired rootful stashing call path remains"
 ! grep -Eq '^libapt64 \+= apt64/methods/rfc2553emu[.]cc$' makefile.ondevice || fail "iOS 15 build still archives the empty RFC 2553 fallback object"
 grep -Fq 'dpkg := dpkg-deb --root-owner-group -Zxz' makefile.ondevice || fail "root-owner-group dpkg packaging is missing"
 ! grep -Fq 'fakeroot' makefile.ondevice || fail "makefile still requires fakeroot"
@@ -118,8 +122,8 @@ ok "minimal pinned Bingner APT inputs are complete"
 # transport contract must already exist in the compiled http.cc itself.  Audit
 # the implementation rather than trusting a diagnostic string in the app.
 http_method="apt64/methods/http.cc"
-[[ "$(grep -Fc 'CFSTR("Cydia/1.1.23")' "$http_method")" -eq 1 ]] || \
-    fail "embedded HTTPS method does not contain exactly one Cydia/1.1.23 User-Agent"
+[[ "$(grep -Fc 'CFSTR("Cydia/1.1.24")' "$http_method")" -eq 1 ]] || \
+    fail "embedded HTTPS method does not contain exactly one Cydia/1.1.24 User-Agent"
 ! grep -Fq 'Telesphoreo APT-HTTP/1.0.592' "$http_method" || \
     fail "obsolete Telesphoreo package User-Agent remains in compiled source"
 for header in \
@@ -208,7 +212,10 @@ grep -Fq 'CFPreferencesAppSynchronize' MobileCydia.mm || fail "privacy acceptanc
 grep -Fq 'if (privacyConsent_ == nil)' MobileCydia.mm || fail "automatic repository refresh is not gated by first-launch acceptance"
 grep -Fq 'if (!CydiaPrivacyConsentIsAccepted())' MobileCydia.mm || fail "featured repository discovery is not gated by first-launch acceptance"
 banner_request_block="$(sed -n '/static void CYM3RequestFeaturedBanner/,/^}/p' Cydia/ModernNativeViews.mm)"
-printf '%s\n' "$banner_request_block" | grep -Fq 'if (!download || !CydiaPrivacyConsentIsAccepted())' || fail "banner artwork can start a network request before first-launch acceptance"
+banner_download_block="$(sed -n '/static void CYM3DownloadFeaturedBanner/,/^}/p' Cydia/ModernNativeViews.mm)"
+printf '%s\n' "$banner_download_block" | grep -Fq 'if (!download || !CydiaPrivacyConsentIsAccepted())' || fail "banner artwork can start a network request before first-launch acceptance"
+printf '%s\n' "$banner_download_block" | grep -Fq 'retry >= 2' || fail "banner retry count is not bounded"
+printf '%s\n' "$banner_download_block" | grep -Fq 'NSURLRequestReloadIgnoringLocalCacheData' || fail "failed cached artwork has no fresh retry"
 printf '%s\n' "$banner_request_block" | grep -Fq 'if (allowNetwork)' || fail "shared banner requests ignore the cache-only caller gate"
 grep -Fq 'This acceptance is stored only on this device' Cydia/ModernNativeViews.mm || fail "privacy surface does not explain local acceptance storage"
 grep -Fq 'Repository requests can include your IP address' Cydia/ModernNativeViews.mm || fail "privacy surface does not disclose repository request data"
@@ -254,7 +261,9 @@ grep -Fq 'CYM3FeaturedBannerRequests' Cydia/ModernNativeViews.mm || fail "tripli
 grep -Fq 'UIImage *cached([CYM3FeaturedBannerCache() objectForKey:imageURL_])' Cydia/ModernNativeViews.mm || fail "in-memory banner artwork is not restored immediately"
 printf '%s\n' "$banner_request_block" | grep -Fq 'dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0)' || fail "cold banner cache reads can block Home construction"
 ! sed -n '/@implementation CYM3FeaturedPackageButton/,/^@end/p' Cydia/ModernNativeViews.mm | grep -Fq 'CYM3CachedFeaturedBanner(' || fail "banner cards synchronously read the file cache"
-grep -Fq 'width * height > 4.0f * 1024.0f * 1024.0f' Cydia/ModernNativeViews.mm || fail "banner preparation has no decoded pixel bound"
+grep -Fq 'CGImageSourceCreateThumbnailAtIndex' Cydia/ModernNativeViews.mm || fail "banner artwork is not downsampled before display"
+grep -Fq 'kCGImageSourceThumbnailMaxPixelSize: @(maxDimension)' Cydia/ModernNativeViews.mm || fail "banner thumbnail dimensions are not bounded"
+grep -Fq 'decodedWidth <= 1536 && decodedHeight <= 1536' Cydia/ModernNativeViews.mm || fail "banner output has no decoded pixel bound"
 grep -Fq '!isfinite(width) || !isfinite(height)' Cydia/ModernNativeViews.mm || fail "nonfinite banner dimensions can reach image preparation"
 grep -Fq 'snapshot = [[orderedResults copy] autorelease]' MobileCydia.mm || fail "partial banner metadata does not use an immutable response snapshot"
 grep -Fq 'generation != featuredRequestGeneration_ || finalResultsApplied' MobileCydia.mm || fail "stale banner metadata can replace a newer result"
@@ -362,7 +371,7 @@ grep -Fq '[heroTitle setText:CYLocalize(@"Welcome to Cydia™")]' Cydia/ModernNa
 grep -Fq 'by Jay Freeman (saurik)' Cydia/ModernNativeViews.mm || fail "original author attribution is missing"
 ! grep -Fq 'heroSubtitle' Cydia/ModernNativeViews.mm || fail "removed Modern Rootless hero label remains"
 ! grep -Fq 'heroDetail' Cydia/ModernNativeViews.mm || fail "removed upper version label remains"
-grep -Fq '[footer setText:@"Cydia 1.1.23"]' Cydia/ModernNativeViews.mm || fail "Home footer version is missing"
+grep -Fq '[footer setText:@"Cydia 1.1.24"]' Cydia/ModernNativeViews.mm || fail "Home footer version is missing"
 ! grep -Fq 'Rootless edition by BarabaDev' Cydia/ModernNativeViews.mm || fail "removed footer credit remains"
 grep -Fq 'CYM3DestinationButton(@"Cydia", @"f"' Cydia/ModernNativeViews.mm || fail "Facebook destination is missing"
 grep -Fq 'CYM3DestinationButton(@"saurik", @"𝕏"' Cydia/ModernNativeViews.mm || fail "saurik social destination is missing"
@@ -461,7 +470,7 @@ cmp -s apt64/COPYING.GPL MobileCydia.app/Licenses/GPL-2.0.txt || fail "APT GPL t
 grep -Fq 'GNU AFFERO GENERAL PUBLIC LICENSE' MobileCydia.app/Licenses/AGPL-3.0.txt || fail "Cytore AGPL text is missing"
 grep -Fq 'Nicolai M. Josuttis 2001' MobileCydia.app/Licenses/NOTICES.txt || fail "Component attribution notices are missing"
 ! grep -Fq 'legalRevealTimer_' Cydia/ModernNativeViews.mm || fail "About still delays license visibility"
-grep -Fq 'legalCopy_ = [@"Modern Rootless • BarabaDev • 7 September 2026' Cydia/ModernNativeViews.mm || fail "About license card does not identify the modified release"
+grep -Fq 'legalCopy_ = [@"Modern Rootless • BarabaDev • 8 September 2026' Cydia/ModernNativeViews.mm || fail "About license card does not identify the modified release"
 ! grep -Fq 'legalCopy_ = [@"Cydia by Jay Freeman' Cydia/ModernNativeViews.mm || fail "About license animation duplicates the original Cydia attribution"
 grep -Fq 'NSLinkAttributeName' Cydia/ModernNativeViews.mm || fail "About source address is not an interactive link"
 grep -Fq 'https://github.com/BarabaDev/Cydia-Rootless' Cydia/ModernNativeViews.mm || fail "About source link has no safe HTTPS destination"
@@ -811,7 +820,7 @@ scripts=(
     modern-source-audit.sh ondevice-sdk.sh package-ondevice.sh prepare-ondevice.sh
     verify-package-ondevice.sh normalize-app-permissions.sh control.sh pngcrush.sh version.sh
     preinst prerm postrm Library/asuser Library/finish.sh Library/firmware.sh
-    Library/free.sh Library/move.sh Library/startup
+    Library/startup
     ../device-build.sh ../mac-quality-audit.sh ../mac-build.sh ../mac-dpkg-deb.sh
 )
 for script in "${scripts[@]}"; do

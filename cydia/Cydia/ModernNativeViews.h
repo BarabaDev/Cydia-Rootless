@@ -1,4 +1,4 @@
-/* Cydia 1.1.23 Rootless - complete native iOS 15+ transaction UI */
+/* Cydia 1.1.24 Rootless - complete native iOS 15+ transaction UI */
 
 #ifndef Cydia_ModernNativeViews_H
 #define Cydia_ModernNativeViews_H

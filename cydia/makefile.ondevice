@@ -146,7 +146,7 @@ libs += -lgnutls
 endif
 
 uikit := 
-uikit += -framework UIKit
+uikit += -framework UIKit -framework ImageIO
 
 dirs := Menes CyteKit Cydia SDURLCache
 
@@ -343,7 +343,7 @@ postinst: postinst.mm CyteKit/stringWith.mm CyteKit/stringWith.h CyteKit/UCPlatf
 	$(cycc) $(plus) -o $@ $(filter %.mm,$^) $(flag) $(link) -framework CoreFoundation -framework Foundation -framework UIKit
 	@ldid -T0 -Sgenent.xml $@
 
-debs/cydia_$(version)_iphoneos-arm64.deb: MobileCydia preinst postinst prerm postrm cfversion setnsfpn cydo du $(images) $(shell find MobileCydia.app) cydia.control ../LICENSE Library/firmware.sh Library/move.sh Library/startup normalize-app-permissions.sh
+debs/cydia_$(version)_iphoneos-arm64.deb: MobileCydia preinst postinst prerm postrm cfversion setnsfpn cydo du $(images) $(shell find MobileCydia.app) cydia.control ../LICENSE Library/firmware.sh Library/startup normalize-app-permissions.sh
 	rm -rf _
 	mkdir -p _/var/jb/var/lib/cydia
 	

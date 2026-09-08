@@ -1,3 +1,15 @@
+# Cydia 1.1.24
+
+Banner visibility update by BarabaDev on **8 September 2026**.
+
+- High-resolution repository artwork is decoded directly into a display-sized image, fixing blank banners including Bohemic, Peek and other valid large images.
+- Banner downloads share bounded retries for temporary connection failures. Missing artwork is retried when Home becomes visible again, and a cached invalid response can be refreshed once.
+- Finished artwork is delivered directly to its cards, and memory-cache accounting uses decoded image size.
+- Banner layout, artwork-only presentation, ordering and carousel motion are unchanged.
+- Removed the unused pre-iOS-15 stashing path and its `free.sh` and `move.sh` scripts. Other compatibility helpers are retained.
+
+The package version is `1.1.24` and the architecture is `iphoneos-arm64`.
+
 # Cydia 1.1.23
 
 Unofficial Modern Rootless edition modified by BarabaDev on **8 September 2026**. Original Cydia and Sam Bingner's contributions retain their original credits and license terms.

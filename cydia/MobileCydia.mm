@@ -12179,75 +12179,6 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
 @end
 /* }}} */
 
-/* Stash Controller {{{ */
-@interface StashController : CyteViewController {
-    _H<UIActivityIndicatorView> spinner_;
-    _H<UILabel> status_;
-    _H<UILabel> caption_;
-}
-
-@end
-
-@implementation StashController
-
-- (void) loadView {
-    UIView *view([[[UIView alloc] initWithFrame:[[UIScreen mainScreen] applicationFrame]] autorelease]);
-    [view setAutoresizingMask:(UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight)];
-    [self setView:view];
-
-    [view setBackgroundColor:[UIColor viewFlipsideBackgroundColor]];
-
-    spinner_ = [[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhiteLarge] autorelease];
-    CGRect spinrect = [spinner_ frame];
-    spinrect.origin.x = Retina([[self view] frame].size.width / 2 - spinrect.size.width / 2);
-    spinrect.origin.y = [[self view] frame].size.height - 80.0f;
-    [spinner_ setFrame:spinrect];
-    [spinner_ setAutoresizingMask:UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleTopMargin];
-    [view addSubview:spinner_];
-    [spinner_ startAnimating];
-
-    CGRect captrect;
-    captrect.size.width = [[self view] frame].size.width;
-    captrect.size.height = 40.0f;
-    captrect.origin.x = 0;
-    captrect.origin.y = Retina([[self view] frame].size.height / 2 - captrect.size.height * 2);
-    caption_ = [[[UILabel alloc] initWithFrame:captrect] autorelease];
-    [caption_ setText:UCLocalize("PREPARING_FILESYSTEM")];
-    [caption_ setAutoresizingMask:UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin];
-    [caption_ setFont:[UIFont boldSystemFontOfSize:28.0f]];
-    [caption_ setTextColor:[UIColor whiteColor]];
-    [caption_ setBackgroundColor:[UIColor clearColor]];
-    [caption_ setShadowColor:[UIColor blackColor]];
-    [caption_ setTextAlignment:NSTextAlignmentCenter];
-    [view addSubview:caption_];
-
-    CGRect statusrect;
-    statusrect.size.width = [[self view] frame].size.width;
-    statusrect.size.height = 30.0f;
-    statusrect.origin.x = 0;
-    statusrect.origin.y = Retina([[self view] frame].size.height / 2 - statusrect.size.height);
-    status_ = [[[UILabel alloc] initWithFrame:statusrect] autorelease];
-    [status_ setAutoresizingMask:UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin];
-    [status_ setText:UCLocalize("EXIT_WHEN_COMPLETE")];
-    [status_ setFont:[UIFont systemFontOfSize:16.0f]];
-    [status_ setTextColor:[UIColor whiteColor]];
-    [status_ setBackgroundColor:[UIColor clearColor]];
-    [status_ setShadowColor:[UIColor blackColor]];
-    [status_ setTextAlignment:NSTextAlignmentCenter];
-    [view addSubview:status_];
-}
-
-- (void) releaseSubviews {
-    spinner_ = nil;
-    status_ = nil;
-    caption_ = nil;
-
-    [super releaseSubviews];
-}
-
-@end
-/* }}} */
-
 @interface Cydia : CyteApplication <
     ConfirmationControllerDelegate,
     DatabaseDelegate,
@@ -12268,8 +12199,6 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
 
     unsigned locked_;
     BOOL homePresentationActive_;
-
-    _H<StashController> stash_;
 
     bool loaded_;
     bool transactionReloadPending_;
@@ -13578,28 +13507,6 @@ _end
     [alert show];
 }
 
-- (void) addStashController {
-    [self lockSuspend];
-    stash_ = [[[StashController alloc] init] autorelease];
-    [window_ addSubview:[stash_ view]];
-}
-
-- (void) removeStashController {
-    [[stash_ view] removeFromSuperview];
-    stash_ = nil;
-    [self unlockSuspend];
-}
-
-- (void) stash {
-    [[UIApplication sharedApplication] setStatusBarStyle:UIStatusBarStyleBlackOpaque];
-    UpdateExternalStatus(1);
-    [self yieldToSelector:@selector(system:) withObject:@"/var/jb/usr/libexec/cydia/cydo /var/jb/usr/libexec/cydia/free.sh"];
-    UpdateExternalStatus(0);
-
-    [self removeStashController];
-    [self reloadSpringBoard];
-}
-
 - (void) applicationDidFinishLaunching:(id)unused {
     NSSetUncaughtExceptionHandler(&CYRootlessUncaughtExceptionHandler);
     NSString *appVersion([[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"<unknown>");
@@ -13624,47 +13531,6 @@ _end
     window_ = [[[CyteWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]] autorelease];
     [window_ setBackgroundColor:[UIColor systemGroupedBackgroundColor]];
     [window_ setTintColor:CYModernAccentColor()];
-
-    if (kCFCoreFoundationVersionNumber < 1349.56 && access("/.cydia_no_stash", F_OK) != 0) {
-
-    if (false) stash: {
-        [self addStashController];
-        [window_ layoutIfNeeded];
-        [window_ orderFront:self];
-        [window_ makeKey:self];
-        [window_ setHidden:NO];
-        // XXX: this would be much cleaner as a yieldToSelector:
-        // that way the removeStashController could happen right here inline
-        // we also could no longer require the useless stash_ field anymore
-        [self performSelector:@selector(stash) withObject:nil afterDelay:0];
-        return;
-    }
-
-    struct stat root;
-    int error(stat("/", &root));
-    _assert(error != -1);
-
-    #define Stash_(path) do { \
-        struct stat folder; \
-        int error(lstat((path), &folder)); \
-        if (error != -1 && ( \
-            folder.st_dev == root.st_dev && \
-            S_ISDIR(folder.st_mode) \
-        ) || error == -1 && ( \
-            errno == ENOENT || \
-            errno == ENOTDIR \
-        )) goto stash; \
-    } while (false)
-
-    Stash_("/Applications");
-    Stash_("/Library/Ringtones");
-    Stash_("/Library/Wallpaper");
-    //Stash_("/usr/bin");
-    Stash_("/usr/include");
-    Stash_("/usr/share");
-    //Stash_("/var/lib");
-
-    }
 
     [window_ setUserInteractionEnabled:NO];
 
