@@ -994,30 +994,30 @@ static BOOL CYRepositoryRefreshReadyForUse(void) {
 
 static NSString *CYRepositoryIssueSummary(NSString *code) {
     if ([code isEqualToString:@"unsigned"])
-        return @"Unsigned repository — no Release signature";
+        return CYLocalize(@"Unsigned repository — no Release signature");
     if ([code isEqualToString:@"missing-key"])
-        return @"Signing key is missing";
+        return CYLocalize(@"Signing key is missing");
     if ([code isEqualToString:@"obsolete-signature"])
-        return @"Obsolete repository signature";
+        return CYLocalize(@"Obsolete repository signature");
     if ([code isEqualToString:@"invalid-signature"])
-        return @"Repository signature is invalid";
+        return CYLocalize(@"Repository signature is invalid");
     if ([code isEqualToString:@"packages-missing"])
-        return @"Packages index was not found";
-    return @"Repository metadata is not authenticated";
+        return CYLocalize(@"Packages index was not found");
+    return CYLocalize(@"Repository metadata is not authenticated");
 }
 
 static NSString *CYRepositoryIssueExplanation(NSString *code) {
     if ([code isEqualToString:@"unsigned"])
-        return @"This source does not publish a signed Release file, so its publisher identity cannot be verified.";
+        return CYLocalize(@"This source does not publish a signed Release file, so its publisher identity cannot be verified.");
     if ([code isEqualToString:@"missing-key"])
-        return @"This source is signed, but its public signing key is not installed or was not supplied correctly.";
+        return CYLocalize(@"This source is signed, but its public signing key is not installed or was not supplied correctly.");
     if ([code isEqualToString:@"obsolete-signature"])
-        return @"This source uses an obsolete SHA-1 digest or legacy signing key that modern APT rejects.";
+        return CYLocalize(@"This source uses an obsolete SHA-1 digest or legacy signing key that modern APT rejects.");
     if ([code isEqualToString:@"invalid-signature"])
-        return @"APT could not validate this source's repository signature.";
+        return CYLocalize(@"APT could not validate this source's repository signature.");
     if ([code isEqualToString:@"packages-missing"])
-        return @"The repository answered, but no supported Packages index was available at the configured path. Allowing it cannot repair a missing index.";
-    return @"APT could not authenticate this repository's metadata.";
+        return CYLocalize(@"The repository answered, but no supported Packages index was available at the configured path. Allowing it cannot repair a missing index.");
+    return CYLocalize(@"APT could not authenticate this repository's metadata.");
 }
 
 static NSString *kCydiaProgressEventTypeError = @"Error";
@@ -1335,6 +1335,11 @@ class CancelStatus :
         Done(desc);
     }
 
+    virtual void Start() {
+        cancelled_ = false;
+        pkgAcquireStatus::Start();
+    }
+
     virtual bool Pulse_(pkgAcquire *Owner) = 0;
 
     virtual bool Pulse(pkgAcquire *Owner) {
@@ -1435,7 +1440,7 @@ class CydiaStatus :
     }
 
     virtual void Start() {
-        pkgAcquireStatus::Start();
+        CancelStatus::Start();
         [[[delegate_ retain] autorelease] performSelectorOnMainThread:@selector(setProgressCancellable:) withObject:[NSNumber numberWithBool:YES] waitUntilDone:YES];
     }
 
@@ -1454,6 +1459,8 @@ typedef std::map< unsigned long, _H<Source> > SourceMap;
     CYPool pool_;
 
     unsigned era_;
+    bool ready_;
+    bool configurationSucceeded_;
     _H<NSDate> delock_;
 
     pkgCacheFile cache_;
@@ -1485,6 +1492,7 @@ typedef std::map< unsigned long, _H<Source> > SourceMap;
 + (Database *) sharedInstance;
 - (unsigned) era;
 - (bool) hasPackages;
+- (bool) ready;
 
 - (void) _readCydia:(NSNumber *)fd;
 - (void) _readStatus:(NSNumber *)fd;
@@ -1511,6 +1519,7 @@ typedef std::map< unsigned long, _H<Source> > SourceMap;
 - (void) performWithRequestedIdentifiers:(NSSet *)requestedIdentifiers;
 - (void) performWithRequestedIdentifiers:(NSSet *)requestedIdentifiers retryCount:(NSUInteger)retryCount;
 - (NSArray *) transactionOperationsForRequestedIdentifiers:(NSSet *)requestedIdentifiers;
+- (NSSet *) transactionPlan;
 - (bool) restoreTransactionOperations:(NSArray *)operations title:(NSString *)title;
 - (bool) rebuildTransactionForRequestedIdentifiers:(NSSet *)requestedIdentifiers title:(NSString *)title;
 - (bool) upgrade;
@@ -3354,7 +3363,6 @@ static UIImage *CYModernPackageFallbackIcon(NSString *section, NSString *identif
         _end
 
         _profile(Package$initWithVersion$Flags)
-            essential_ |= ((iterator->Flags & pkgCache::Flag::Essential) == 0 ? NO : YES);
             ignored_ = iterator->SelectedState == pkgCache::State::Hold;
         _end
 
@@ -3366,6 +3374,9 @@ static UIImage *CYModernPackageFallbackIcon(NSString *section, NSString *identif
             }
         _end
 #endif
+        // Repository priority may suppress a cydia::essential tag, but must
+        // never erase Debian's Essential flag used by upgrade/removal safety.
+        essential_ |= (iterator->Flags & pkgCache::Flag::Essential) != 0;
 
     _end } return self;
 }
@@ -4885,8 +4896,14 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
     return error;
 }
 
+- (bool) ready {
+    return ready_ && cache_.IsDepCacheBuilt() && resolver_ != NULL && records_ != NULL && fetcher_ != NULL;
+}
+
 - (void) reloadDataWithInvocation:(NSInvocation *)invocation {
 @synchronized (self) {
+    ready_ = false;
+    bool attemptedRepair(false);
     uint64_t diagnosticsStart(_timestamp);
     CYRootlessDiag(@"DATABASE", @"reload begin hasInvocation=%d eraNext=%u", invocation != nil, era_ + 1);
     ++era_;
@@ -4997,10 +5014,16 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
             // else if (error == "Malformed Status line")
             // else if (error == "The list of sources could not be read.")
 
-            if (repair != NULL) {
+            if (repair != NULL && !attemptedRepair) {
+                attemptedRepair = true;
+                configurationSucceeded_ = false;
                 _error->Discard();
                 [delegate_ repairWithSelector:repair];
-                goto open;
+                if (configurationSucceeded_)
+                    goto open;
+                // Leave the model unavailable and preserve the failure. A
+                // persistent maintainer-script error must not loop at launch.
+                return;
             }
         }
 
@@ -5164,6 +5187,7 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
             [package release];
         }
     }
+    ready_ = true;
     CYRootlessDiag(@"DATABASE", @"reload end status=ok sources=%lu packages=%lu durationMs=%llu",
         (unsigned long) [sourceList_ count],
         (unsigned long) [packages_ count],
@@ -5172,6 +5196,8 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
 
 - (void) clear {
 @synchronized (self) {
+    if (![self ready])
+        return;
     delete resolver_;
     resolver_ = new pkgProblemResolver(cache_);
 
@@ -5183,10 +5209,25 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
 } }
 
 - (void) configure {
-    NSString *dpkg = [NSString stringWithFormat:@"/var/jb/usr/libexec/cydia/cydo --configure -a --status-fd %u", statusfd_];
-    _trace();
-    system([dpkg UTF8String]);
-    _trace();
+    configurationSucceeded_ = false;
+    const char *helper("/var/jb/usr/libexec/cydia/cydo");
+    char descriptor[32];
+    snprintf(descriptor, sizeof(descriptor), "%u", statusfd_);
+    char *const arguments[] = {
+        const_cast<char *>(helper), const_cast<char *>("--configure"),
+        const_cast<char *>("-a"), const_cast<char *>("--status-fd"), descriptor, NULL
+    };
+    pid_t child(-1);
+    int result(posix_spawn(&child, helper, NULL, NULL, arguments, environ));
+    int status(0);
+    pid_t waited(-1);
+    if (result == 0)
+        do { waited = waitpid(child, &status, 0); } while (waited == -1 && errno == EINTR);
+    configurationSucceeded_ = result == 0 && waited == child && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    if (!configurationSucceeded_)
+        [delegate_ addProgressEventOnMainThread:[CydiaProgressEvent
+            eventWithMessage:@"Package configuration could not be completed. Review the repair details before trying again."
+            ofType:kCydiaProgressEventTypeError] forTask:UCLocalize("DATABASE")];
 }
 
 - (bool) clean {
@@ -5221,7 +5262,7 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
     delete lock_;
     lock_ = NULL;
     CYClearSensitiveDownloadURLs();
-    if (fetcher_ == NULL || !cache_.IsDepCacheBuilt()) {
+    if (![self ready]) {
         [delegate_ addProgressEventOnMainThread:[CydiaProgressEvent
             eventWithMessage:@"Package data is not ready. Refresh Sources and try again."
             ofType:kCydiaProgressEventTypeError] forTask:UCLocalize("PREPARE_ARCHIVES")];
@@ -5386,7 +5427,7 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
 }
 
 - (NSArray *) transactionOperationsForRequestedIdentifiers:(NSSet *)requestedIdentifiers {
-    if ([requestedIdentifiers count] == 0)
+    if (![self ready] || [requestedIdentifiers count] == 0)
         return [NSArray array];
 
     NSMutableArray *operations([NSMutableArray arrayWithCapacity:[requestedIdentifiers count]]);
@@ -5404,7 +5445,7 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
 
         if (!state.Install() && (state.iFlags & pkgDepCache::ReInstall) == 0)
             continue;
-        pkgCache::VerIterator version(cache_->GetCandidateVersion(iterator));
+        pkgCache::VerIterator version(state.InstVerIter(cache_));
         if (version.end())
             continue;
         NSString *versionText([NSString stringWithUTF8String:version.VerStr()]);
@@ -5423,8 +5464,17 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
     return operations;
 }
 
+- (NSSet *) transactionPlan {
+    if (![self ready])
+        return nil;
+    NSMutableSet *identifiers([NSMutableSet set]);
+    for (pkgCache::PkgIterator iterator(cache_->PkgBegin()); !iterator.end(); ++iterator)
+        [identifiers addObject:[NSString stringWithUTF8String:iterator.Name()]];
+    return [NSSet setWithArray:[self transactionOperationsForRequestedIdentifiers:identifiers]];
+}
+
 - (bool) restoreTransactionOperations:(NSArray *)operations title:(NSString *)title {
-    if ([operations count] == 0)
+    if (![self ready] || [operations count] == 0)
         return false;
 
     NSUInteger reapplied(0);
@@ -5489,6 +5539,7 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
 }
 
 - (bool) rebuildTransactionForRequestedIdentifiers:(NSSet *)requestedIdentifiers title:(NSString *)title {
+    _H<NSSet> reviewedPlan([self transactionPlan]);
     NSArray *operations([[self transactionOperationsForRequestedIdentifiers:requestedIdentifiers] retain]);
     if ([operations count] == 0) {
         CYRootlessDiag(@"DPKG_LOCK", @"automatic replan skipped reason=no-explicit-operations requested=%lu",
@@ -5513,6 +5564,13 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
     NSUInteger operationCount([operations count]);
     [operations release];
 
+    if (![reviewedPlan isEqual:[self transactionPlan]]) {
+        [delegate_ addProgressEventOnMainThread:[CydiaProgressEvent
+            eventWithMessage:@"Package state changed and the required changes are different. Review the package queue again before applying them."
+            ofType:kCydiaProgressEventTypeError] forTask:title];
+        CYRootlessDiag(@"DPKG_LOCK", @"automatic replan stopped reason=reviewed-plan-changed");
+        return false;
+    }
     if (![self prepare]) {
         CYRootlessDiag(@"DPKG_LOCK", @"automatic replan failed phase=prepare explicitOperations=%lu", (unsigned long) operationCount);
         return false;
@@ -5573,10 +5631,11 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
 
     // Balance activity on every exit, including cancellation and transport failure.
     [delegate_ performSelectorOnMainThread:@selector(releaseNetworkActivityIndicator) withObject:nil waitUntilDone:YES];
-    if (fetchResult != pkgAcquire::Continue) {
+    bool cancelled([[self safeProgressDelegate] isProgressCancelled]);
+    if (fetchResult != pkgAcquire::Continue || cancelled) {
         _trace();
         bool reported([self popErrorWithTitle:title]);
-        if (fetchResult != pkgAcquire::Cancelled && !reported)
+        if (fetchResult != pkgAcquire::Cancelled && !cancelled && !reported)
             [delegate_ addProgressEventOnMainThread:[CydiaProgressEvent
                 eventWithMessage:@"Package downloads could not be completed. Try again."
                 ofType:kCydiaProgressEventTypeError] forTask:title];
@@ -5627,6 +5686,11 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
         return;
     }
 
+    // Stop() has already disabled the Cancel button on the main thread.
+    // Honor every cancellation accepted before that transition, even if APT
+    // finished its last download before the next periodic cancellation pulse.
+    if ([[self safeProgressDelegate] isProgressCancelled])
+        return;
     delock_ = nil;
 
     // Persist a crash marker before the first dpkg child starts.  If Cydia is
@@ -5691,6 +5755,8 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
 }
 
 - (bool) upgrade {
+    if (![self ready])
+        return false;
     NSString *title(UCLocalize("UPGRADE"));
     if ([self popErrorWithTitle:title forOperation:pkgDistUpgrade(cache_)])
         return false;
@@ -6429,7 +6495,7 @@ static UIView *CYModernNativeControllerRoot(NSString *surface) {
     NSUInteger activeActions(0);
     NSUInteger packageCount(0);
     NSArray *keys([NSArray arrayWithObjects:@"installs", @"reinstalls", @"upgrades", @"dependencies", @"downgrades", @"removes", nil]);
-    NSArray *labels([NSArray arrayWithObjects:UCLocalize("INSTALL"), UCLocalize("REINSTALL"), UCLocalize("UPGRADE"), @"Dependencies", UCLocalize("DOWNGRADE"), UCLocalize("REMOVE"), nil]);
+    NSArray *labels([NSArray arrayWithObjects:UCLocalize("INSTALL"), UCLocalize("REINSTALL"), UCLocalize("UPGRADE"), CYLocalize(@"Dependencies"), UCLocalize("DOWNGRADE"), UCLocalize("REMOVE"), nil]);
     for (NSUInteger index(0); index != [keys count]; ++index) {
         NSString *key([keys objectAtIndex:index]);
         NSArray *identifiers([changes_ objectForKey:key]);
@@ -6442,7 +6508,7 @@ static UIView *CYModernNativeControllerRoot(NSString *surface) {
         primaryKey = key;
         ++activeActions;
         packageCount += count;
-        [parts addObject:[NSString stringWithFormat:@"%@ %lu", label, (unsigned long) count]];
+        [parts addObject:CYLocalizedMetric(label, count)];
 
         NSMutableArray *items([NSMutableArray arrayWithCapacity:count]);
         for (NSString *identifier in identifiers) {
@@ -6517,23 +6583,23 @@ static UIView *CYModernNativeControllerRoot(NSString *surface) {
     NSUInteger dependencyCount([[changes_ objectForKey:@"dependencies"] count]);
     NSUInteger requestedUpgradeCount([[changes_ objectForKey:@"upgrades"] count]);
     BOOL upgradeWithDependencies(requestedIdentifiers_ != nil && requestedUpgradeCount != 0 && dependencyCount != 0);
-    NSString *operationTitle(upgradeWithDependencies ? UCLocalize("UPGRADE") : (activeActions == 1 ? primaryAction : @"Package Changes"));
-    NSString *summary(upgradeWithDependencies ? [NSString stringWithFormat:@"%lu upgrade%@  •  %lu dependenc%@",
-        (unsigned long) requestedUpgradeCount, requestedUpgradeCount == 1 ? @"" : @"s",
-        (unsigned long) dependencyCount, dependencyCount == 1 ? @"y" : @"ies"] :
-        (activeActions == 1 ? [NSString stringWithFormat:@"%lu package%@", (unsigned long) packageCount,
-        packageCount == 1 ? @"" : @"s"] : ([parts count] == 0 ? CYLocalize(@"No changes selected") : [parts componentsJoinedByString:@"  •  "])));
-    NSString *actionTitle(upgradeWithDependencies ? UCLocalize("UPGRADE") : (activeActions == 1 ? primaryAction : @"Apply Changes"));
+    NSString *operationTitle(upgradeWithDependencies ? UCLocalize("UPGRADE") : (activeActions == 1 ? primaryAction : CYLocalize(@"Package Changes")));
+    NSString *summary(upgradeWithDependencies ? [NSString stringWithFormat:CYLocalize(@"%@  •  %@"),
+        CYLocalizedMetric(CYLocalize(@"Upgrades"), requestedUpgradeCount),
+        CYLocalizedMetric(CYLocalize(@"Dependencies"), dependencyCount)] :
+        (activeActions == 1 ? CYLocalizedMetric(CYLocalize(@"Packages"), packageCount) :
+        ([parts count] == 0 ? CYLocalize(@"No changes selected") : [parts componentsJoinedByString:@"  •  "])));
+    NSString *actionTitle(upgradeWithDependencies ? UCLocalize("UPGRADE") : (activeActions == 1 ? primaryAction : CYLocalize(@"Apply Changes")));
     BOOL destructive(activeActions == 1 && [primaryKey isEqualToString:@"removes"]);
     long long downloading([[sizes_ objectForKey:@"downloading"] longLongValue]);
-    NSString *download(packageCount == 0 || downloading <= 0 ? @"" : [NSString stringWithFormat:@"%@ %@",
-        @"Download size:", [NSByteCountFormatter stringFromByteCount:downloading countStyle:NSByteCountFormatterCountStyleFile]]);
+    NSString *download(packageCount == 0 || downloading <= 0 ? @"" : [NSString stringWithFormat:CYLocalize(@"Download size: %@"),
+        [NSByteCountFormatter stringFromByteCount:downloading countStyle:NSByteCountFormatterCountStyleFile]]);
 
     [modernConfirmationView_ setSummaryTitle:operationTitle detail:summary download:download];
     [modernConfirmationView_ setSections:sections];
     NSMutableArray *warnings([NSMutableArray arrayWithCapacity:2]);
     if ([issues_ count] != 0)
-        [warnings addObject:[NSString stringWithFormat:@"%lu package issue%@", (unsigned long) [issues_ count], [issues_ count] == 1 ? @"" : @"s"]];
+        [warnings addObject:CYLocalizedMetric(CYLocalize(@"Package issues"), [issues_ count])];
     NSString *warning([warnings componentsJoinedByString:@" • "]);
     [modernConfirmationView_ setWarningText:warning];
     BOOL enabled(CYTransactionCanConfirm(changes_, issues_, confirmationStarted_));
@@ -6579,7 +6645,7 @@ static UIView *CYModernNativeControllerRoot(NSString *surface) {
     [super viewWillAppear:animated];
     CYModernizeNavigationController([self navigationController]);
     [[self navigationController] setModalInPresentation:YES];
-    [[self navigationItem] setTitle:@"Review Changes"];
+    [[self navigationItem] setTitle:CYLocalize(@"Review Changes")];
     [[self navigationItem] setLargeTitleDisplayMode:UINavigationItemLargeTitleDisplayModeNever];
     [self updateModernConfirmationView];
 }
@@ -7303,6 +7369,8 @@ static NSString *CYFinalFinishActionName(int finish, int rebootMode) {
         navigationTitle = CYLocalize(@"Refreshing");
     if ([navigationTitle caseInsensitiveCompare:@"COMPLETE"] == NSOrderedSame)
         navigationTitle = CYLocalize(@"Summary");
+    else if ([navigationTitle caseInsensitiveCompare:@"REPAIRING"] == NSOrderedSame)
+        navigationTitle = UCLocalize("REPAIRING");
     [[self navigationItem] setTitle:navigationTitle];
     [self updateProgress];
 }
@@ -7335,7 +7403,9 @@ static NSString *CYFinalFinishActionName(int finish, int rebootMode) {
 
     [progress_ setRunning:true];
     finishActionStarted_ = false;
-    cancellationRequested_ = false;
+    @synchronized (self) {
+        cancellationRequested_ = false;
+    }
     cancel_ = 0;
     [warningMessages_ removeAllObjects];
     modernProgressError_ = false;
@@ -7419,7 +7489,7 @@ static NSString *CYFinalFinishActionName(int finish, int rebootMode) {
         case 1: [progress_ setFinish:UCLocalize("CLOSE_CYDIA")]; break;
         case 2: [progress_ setFinish:UCLocalize("RESTART_SPRINGBOARD")]; break;
         case 3: [progress_ setFinish:UCLocalize("RELOAD_SPRINGBOARD")]; break;
-        case 4: [progress_ setFinish:RebootMode_ == 1 ? @"Restart Userspace" : UCLocalize("REBOOT_DEVICE")]; break;
+        case 4: [progress_ setFinish:RebootMode_ == 1 ? CYLocalize(@"Restart Userspace") : UCLocalize("REBOOT_DEVICE")]; break;
     }
 
     UpdateExternalStatus(Finish_ == 0 ? 0 : 2);
@@ -7429,7 +7499,7 @@ static NSString *CYFinalFinishActionName(int finish, int rebootMode) {
         BOOL refreshFailure([title caseInsensitiveCompare:@"UPDATING_SOURCES"] == NSOrderedSame ||
             [[title lowercaseString] rangeOfString:@"refresh"].location != NSNotFound);
         [modernProgressView_ setTransactionTitle:refreshFailure ? @"Refresh Failed" : @"Transaction Failed"];
-        [[self navigationItem] setTitle:@"Failed"];
+        [[self navigationItem] setTitle:CYLocalize(@"Failed")];
     } else if (cancellationRequested_) {
         [modernProgressView_ setCancelledState:YES];
         [[self navigationItem] setTitle:CYLocalize(@"Cancelled")];
@@ -7484,15 +7554,19 @@ static NSString *CYFinalFinishActionName(int finish, int rebootMode) {
 }
 
 - (bool) isProgressCancelled {
-    return cancel_ == 2;
+    @synchronized (self) {
+        return cancellationRequested_;
+    }
 }
 
 - (void) cancel {
     if (cancel_ != 1)
         return;
-    cancellationRequested_ = true;
+    @synchronized (self) {
+        cancellationRequested_ = true;
+    }
     cancel_ = 2;
-    [modernProgressView_ setStatusText:@"Cancelling…"];
+    [modernProgressView_ setStatusText:CYLocalize(@"Cancelling…")];
     [self updateCancel];
 }
 
@@ -7731,13 +7805,13 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
 
         sourceLabel_ = [[[UILabel alloc] init] autorelease];
         [sourceLabel_ setFont:[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1]];
-        [sourceLabel_ setTextColor:[UIColor tertiaryLabelColor]];
+        [sourceLabel_ setTextColor:CYModernLabelColor()];
         [sourceLabel_ setNumberOfLines:1];
         [sourceLabel_ setAdjustsFontForContentSizeCategory:YES];
 
         descriptionLabel_ = [[[UILabel alloc] init] autorelease];
         [descriptionLabel_ setFont:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]];
-        [descriptionLabel_ setTextColor:[UIColor secondaryLabelColor]];
+        [descriptionLabel_ setTextColor:CYModernPackageDescriptionColor(NO)];
         [descriptionLabel_ setNumberOfLines:1];
         [descriptionLabel_ setAdjustsFontForContentSizeCategory:YES];
 
@@ -7774,7 +7848,7 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
         nil]];
 
         UIView *selection([[[UIView alloc] initWithFrame:CGRectZero] autorelease]);
-        [selection setBackgroundColor:[[UIColor systemBlueColor] colorWithAlphaComponent:0.12f]];
+        [selection setBackgroundColor:[CYModernAccentColor() colorWithAlphaComponent:0.12f]];
         [self setSelectedBackgroundView:selection];
     } return self;
 }
@@ -7911,7 +7985,9 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
     [nameLabel_ setText:name_];
     [nameLabel_ setTextColor:commercial_ ? CYModernCommercialColor() : [UIColor labelColor]];
     [sourceLabel_ setText:source_];
+    [sourceLabel_ setTextColor:commercial_ ? CYModernCommercialColor() : CYModernLabelColor()];
     [descriptionLabel_ setText:description_];
+    [descriptionLabel_ setTextColor:CYModernPackageDescriptionColor(commercial_)];
     [sourceLabel_ setHidden:summarized_];
     [descriptionLabel_ setHidden:summarized_];
 
@@ -7922,7 +7998,7 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
         [statusView_ setHidden:NO];
     } else if (mode != nil) {
         [statusView_ setImage:[UIImage cy_symbolNamed:@"arrow.down.circle.fill"]];
-        [statusView_ setTintColor:[UIColor systemBlueColor]];
+        [statusView_ setTintColor:CYModernAccentColor()];
         [statusView_ setHidden:NO];
     } else if (package != nil && [package installed] != nil) {
         [statusView_ setImage:[UIImage cy_symbolNamed:@"checkmark.circle.fill"]];
@@ -8006,7 +8082,7 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
     [name_ drawAtPoint:CGPointMake(48, 8) forWidth:(width - (placard_ == nil ? 80 : 106)) withFont:Font18Bold_ lineBreakMode:NSLineBreakByTruncatingTail];
     [source_ drawAtPoint:CGPointMake(58, 29) forWidth:(width - 95) withFont:Font12_ lineBreakMode:NSLineBreakByTruncatingTail];
 
-    [(commercial_ ? CYModernCommercialColor() : CYModernSecondaryLabelColor()) set];
+    [CYModernPackageDescriptionColor(commercial_) set];
     [description_ drawAtPoint:CGPointMake(12, 46) forWidth:(width - 46) withFont:Font14_ lineBreakMode:NSLineBreakByTruncatingTail];
 
     if (placard_ != nil)
@@ -8112,8 +8188,8 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
         name_ = UCLocalize("ALL_PACKAGES");
         count_ = nil;
         [symbol_ setImage:[UIImage cy_symbolNamed:@"shippingbox.fill"]];
-        [symbol_ setTintColor:[UIColor systemBlueColor]];
-        [symbol_ setBackgroundColor:[[UIColor systemBlueColor] colorWithAlphaComponent:0.10f]];
+        [symbol_ setTintColor:CYModernAccentColor()];
+        [symbol_ setBackgroundColor:[CYModernAccentColor() colorWithAlphaComponent:0.10f]];
     } else {
         basic_ = [section name];
         section_ = [section localized];
@@ -8260,9 +8336,16 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
     UINavigationController *existing(CYPackageActionsNavigation(self));
     if (existing == nil) existing = CYPackageActionsNavigation([[[self view] window] rootViewController]);
     if ([self presentedViewController] != nil && existing == nil) return;
+    NSString *iconAddress([[package_ remoteIconURL] absoluteString]);
+    UIImage *icon(nil);
+    if ([iconAddress length] != 0) {
+        icon = [CYModernPackageIconCache() objectForKey:iconAddress];
+        if (icon == nil) icon = CYModernPackageIconFromDisk(iconAddress);
+    }
+    if (icon == nil) icon = [package_ icon];
     CydiaPackageActionsController *page = [[[CydiaPackageActionsController alloc]
         initWithTitle:title packageName:[package_ name] version:[package_ installed] ?: [package_ latest]
-        icon:[package_ icon] actions:actions selection:selection] autorelease];
+        icon:icon actions:actions selection:selection] autorelease];
     if (existing != nil) {
         CYReplacePackagePanel(existing, page);
         [existing setModalInPresentation:NO];
@@ -8329,11 +8412,11 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
                 @"symbol":symbols[identifier] ?: @"shippingbox", @"destructive":@([identifier isEqualToString:@"REMOVE"])}];
         }
         unsigned era = [database_ era];
-        [self presentPackageActions:actions title:UCLocalize("MODIFY") selection:^(NSString *identifier) {
+        CYPresentPackageActionMenu(self, [modernDetail_ actionSourceView], actions, ^(NSString *identifier) {
             if (era != [database_ era]) { [self reloadData]; return; }
             for (const auto &button : buttons_)
                 if ([button.first isEqualToString:identifier]) { [self _clickButtonWithName:identifier]; return; }
-        }];
+        });
     }
 }
 
@@ -8379,7 +8462,9 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
     [super reloadData];
 
     UINavigationController *presented = (UINavigationController *)[self presentedViewController];
-    if ([presented isKindOfClass:UINavigationController.class] &&
+    if (CYInvalidatePackageActionMenu(presented))
+        [presented dismissViewControllerAnimated:NO completion:nil];
+    else if ([presented isKindOfClass:UINavigationController.class] &&
         [[presented topViewController] isKindOfClass:CydiaPackageActionsController.class]) {
         [(CydiaPackageActionsController *)[presented topViewController] invalidateSelection];
         [presented dismissViewControllerAnimated:NO completion:nil];
@@ -8511,7 +8596,7 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
             if ([[info objectForKey:@"purchased"] boolValue] || ![[info objectForKey:@"available"] boolValue])
                 return;
             NSString *price([info objectForKey:@"price"]);
-            NSString *title([price length] == 0 ? @"Buy" : [NSString stringWithFormat:@"Buy \u00b7 %@", price]);
+            NSString *title([price length] == 0 ? CYLocalize(@"Buy") : [NSString stringWithFormat:CYLocalize(@"Buy \u00b7 %@"), price]);
             [modernDetail_ setActionTitle:title destructive:NO target:self action:@selector(buyButtonClicked)];
         });
     });
@@ -8524,7 +8609,7 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
     if (source == nil)
         return;
     purchaseInProgress_ = true;
-    [modernDetail_ setActionTitle:@"Purchasing\u2026" destructive:NO target:self action:@selector(buyButtonClicked)];
+    [modernDetail_ setActionTitle:CYLocalize(@"Purchasing\u2026") destructive:NO target:self action:@selector(buyButtonClicked)];
     NSString *repositoryURL([source rooturi]);
     NSString *packageID([package_ id]);
     NSString *model(Machine_ != NULL ? [NSString stringWithUTF8String:Machine_] : nil);
@@ -8604,15 +8689,15 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
                         [self reloadData];
                 }];
             [[UIApplication sharedApplication] openURL:url options:[NSDictionary dictionary] completionHandler:nil];
-            [self presentPurchaseError:@"Complete the purchase in the browser that just opened, then return to Cydia."];
+            [self presentPurchaseError:CYLocalize(@"Complete the purchase in the browser that just opened, then return to Cydia.")];
         } else {
-            [self presentPurchaseError:@"The secure purchase session could not start."];
+            [self presentPurchaseError:CYLocalize(@"The secure purchase session could not start.")];
         }
     }
 }
 
 - (void) presentPurchaseError:(NSString *)message {
-    UIAlertController *alert([UIAlertController alertControllerWithTitle:@"Purchase"
+    UIAlertController *alert([UIAlertController alertControllerWithTitle:CYLocalize(@"Purchase")
         message:([message length] == 0 ? CYLocalize(@"The purchase could not be completed.") : message)
         preferredStyle:UIAlertControllerStyleAlert]);
     [alert addAction:[UIAlertAction actionWithTitle:CYLocalize(@"OK") style:UIAlertActionStyleDefault handler:nil]];
@@ -9481,6 +9566,10 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
         return;
     }
 
+    // Cards can already exist beneath the first-run consent surface. Resume
+    // their missing artwork now without replacing the visible carousel.
+    [home_ loadFeaturedArtwork];
+
     // Sileo and Zebra discover repository artwork through this exact file at
     // each source root. Aggregate every installed source rather than keeping
     // a hand-maintained host list, while retaining Sileo's global selection.
@@ -9508,6 +9597,7 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
     for (NSUInteger index(0); index != [endpoints count]; ++index)
         [orderedResults addObject:[NSNull null]];
     __block NSUInteger remaining([endpoints count]);
+    __block BOOL finalResultsApplied(NO);
 
     for (NSUInteger index(0); index != [endpoints count]; ++index) {
         NSDictionary *endpoint([endpoints objectAtIndex:index]);
@@ -9527,20 +9617,30 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
                 }
 
                 BOOL complete(NO);
+                NSArray *snapshot(nil);
                 @synchronized (orderedResults) {
                     [orderedResults replaceObjectAtIndex:index withObject:records];
                     complete = --remaining == 0;
+                    snapshot = [[orderedResults copy] autorelease];
                 }
-                if (!complete)
-                    return;
 
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    if (generation != featuredRequestGeneration_)
+                    if (generation != featuredRequestGeneration_ || finalResultsApplied)
+                        return;
+                    if (complete)
+                        finalResultsApplied = YES;
+                    // An empty Home can display the first usable source without
+                    // waiting for every other repository to finish or time out.
+                    // Keep an existing carousel and its position until the final
+                    // explicit refresh result, preserving the normal stable order.
+                    if (!complete && featuredPackagesLoaded_)
                         return;
                     NSMutableArray *combined([NSMutableArray array]);
-                    for (id result in orderedResults)
+                    for (id result in snapshot)
                         if ([result isKindOfClass:[NSArray class]])
                             [combined addObjectsFromArray:result];
+                    if (!complete && [combined count] == 0)
+                        return;
                     // A failed manual refresh keeps the useful banners already on screen.
                     if ([combined count] == 0 && refreshVisibleBanners && featuredPackagesLoaded_) {
                         [self finishHomeReloadFeedback];
@@ -9548,7 +9648,8 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
                     }
                     if ([combined count] == 0)
                         [combined addObjectsFromArray:CYFeaturedFallbackBannerRecords()];
-                    [[NSUserDefaults standardUserDefaults] setObject:combined forKey:CYFeaturedCacheKey];
+                    if (complete)
+                        [[NSUserDefaults standardUserDefaults] setObject:combined forKey:CYFeaturedCacheKey];
 
                     // Automatic discovery preserves the visible carousel. Only an
                     // explicit Home Reload applies fresh banners immediately.
@@ -9556,7 +9657,8 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
                         CYReplaceFeaturedProcessBannerRecords(combined);
                         [self applyFeaturedBannerRecords:CYFeaturedProcessBannerRecords() generation:generation];
                     }
-                    [self finishHomeReloadFeedback];
+                    if (complete)
+                        [self finishHomeReloadFeedback];
                 });
             }]);
         [task resume];
@@ -9565,17 +9667,17 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
 
 - (void) viewDidLoad {
     [super viewDidLoad];
-    [[self navigationItem] setTitle:@"Home"];
+    [[self navigationItem] setTitle:UCLocalize("HOME")];
     // Home owns a complete native dashboard, so a second large-title row only
     // wastes space and can clip while the dashboard scrolls. Keep one compact
     // bar: About, centred Home, Refresh.
     [[self navigationItem] setLargeTitleDisplayMode:UINavigationItemLargeTitleDisplayModeNever];
     [[self navigationItem] setLeftBarButtonItem:[self leftButton]];
     reloadButton_ = [[[CydiaNavigationButton alloc] initWithSymbol:@"arrow.clockwise"
-        label:@"Reload Home" target:self action:@selector(reloadButtonClicked)] autorelease];
+        label:CYLocalize(@"Reload Home") target:self action:@selector(reloadButtonClicked)] autorelease];
     UIBarButtonItem *reloadItem([[[UIBarButtonItem alloc] initWithCustomView:reloadButton_] autorelease]);
     CydiaNavigationButton *fullScreen([[[CydiaNavigationButton alloc]
-        initWithSymbol:@"arrow.up.left.and.arrow.down.right" label:@"Full Screen"
+        initWithSymbol:@"arrow.up.left.and.arrow.down.right" label:CYLocalize(@"Full Screen")
         target:self action:@selector(toggleFullScreenClicked)] autorelease]);
     UIBarButtonItem *fullScreenItem([[[UIBarButtonItem alloc] initWithCustomView:fullScreen] autorelease]);
     // Reload (rightmost) refreshes the Home dashboard; the expand glyph beside
@@ -9738,7 +9840,7 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
     [[sourceCompletion_ layer] setCornerCurve:kCACornerCurveContinuous];
     [sourceCompletion_ setUserInteractionEnabled:NO];
     [sourceCompletion_ setIsAccessibilityElement:YES];
-    [sourceCompletion_ setAccessibilityLabel:success ? @"Sources refreshed" : @"Source refresh completed with warnings"];
+    [sourceCompletion_ setAccessibilityLabel:success ? CYLocalize(@"Sources refreshed") : CYLocalize(@"Source refresh completed with warnings")];
     [[self tabBar] addSubview:sourceCompletion_];
     [self layoutSourceActivity];
 
@@ -10049,6 +10151,12 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
 
 @implementation SectionController
 
+- (BOOL) supportsPullToRefresh {
+    // All Packages and category lists use the shared database snapshot.
+    // Repository refresh belongs to Sources, where progress is tracked.
+    return NO;
+}
+
 - (NSURL *) referrerURL {
     NSString *name(section_);
     name = name ?: @"*";
@@ -10134,11 +10242,11 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
     if ([sections_ count] == 0) {
         [[self navigationItem] setRightBarButtonItem:nil];
     } else {
-        [[self navigationItem] setRightBarButtonItem:[[UIBarButtonItem alloc]
-            initWithBarButtonSystemItem:([self isEditing] ? UIBarButtonSystemItemDone : UIBarButtonSystemItemEdit)
-            target:self
-            action:@selector(editButtonClicked)
-        ] animated:([[self navigationItem] rightBarButtonItem] != nil)];
+        [[self navigationItem] setRightBarButtonItem:CYModernBarButtonItem(
+            [self isEditing] ? @"checkmark" : @"pencil",
+            [self isEditing] ? UCLocalize("DONE") : UCLocalize("EDIT"),
+            [self isEditing] ? UIBarButtonItemStyleDone : UIBarButtonItemStylePlain,
+            self, @selector(editButtonClicked)) animated:([[self navigationItem] rightBarButtonItem] != nil)];
     }
 }
 
@@ -10389,19 +10497,11 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
 
 - (void) setLeftBarButtonItem {
     if ([self.delegate updating])
-        [[self navigationItem] setLeftBarButtonItem:[[[UIBarButtonItem alloc]
-            initWithTitle:UCLocalize("CANCEL")
-            style:UIBarButtonItemStyleDone
-            target:self
-            action:@selector(cancelButtonClicked)
-        ] autorelease] animated:YES];
+        [[self navigationItem] setLeftBarButtonItem:CYModernBarButtonItem(@"xmark", UCLocalize("CANCEL"),
+            UIBarButtonItemStyleDone, self, @selector(cancelButtonClicked)) animated:YES];
     else
-        [[self navigationItem] setLeftBarButtonItem:[[[UIBarButtonItem alloc]
-            initWithTitle:UCLocalize("REFRESH")
-            style:UIBarButtonItemStylePlain
-            target:self
-            action:@selector(refreshButtonClicked)
-        ] autorelease] animated:YES];
+        [[self navigationItem] setLeftBarButtonItem:CYModernBarButtonItem(@"arrow.clockwise", UCLocalize("REFRESH"),
+            UIBarButtonItemStylePlain, self, @selector(refreshButtonClicked)) animated:YES];
 }
 
 - (void) refreshButtonClicked {
@@ -10698,14 +10798,14 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
     [icon setPreferredSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:42.0f weight:UIImageSymbolWeightRegular]];
 
     UILabel *title([[[UILabel alloc] init] autorelease]);
-    [title setText:@"Search Packages"];
+    [title setText:CYLocalize(@"Search Packages")];
     [title setFont:[UIFont preferredFontForTextStyle:UIFontTextStyleTitle2]];
     [title setTextColor:[UIColor labelColor]];
     [title setTextAlignment:NSTextAlignmentCenter];
     [title setAdjustsFontForContentSizeCategory:YES];
 
     UILabel *detail([[[UILabel alloc] init] autorelease]);
-    [detail setText:@"Find packages by name, identifier, author, or maintainer."];
+    [detail setText:CYLocalize(@"Find packages by name, identifier, author, or maintainer.")];
     [detail setFont:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]];
     [detail setTextColor:[UIColor secondaryLabelColor]];
     [detail setTextAlignment:NSTextAlignmentCenter];
@@ -11132,7 +11232,7 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
         segmented_ = [[[UISegmentedControl alloc] initWithItems:[NSArray arrayWithObjects:UCLocalize("USER"), UCLocalize("EXPERT"), UCLocalize("RECENT"), nil]] autorelease];
         [segmented_ setSelectedSegmentIndex:0];
         [segmented_ setBackgroundColor:[UIColor secondarySystemGroupedBackgroundColor]];
-        [segmented_ setSelectedSegmentTintColor:[UIColor systemBlueColor]];
+        [segmented_ setSelectedSegmentTintColor:CYModernPrimaryButtonColor()];
         [segmented_ setTitleTextAttributes:[NSDictionary dictionaryWithObjectsAndKeys:
             [UIColor labelColor], NSForegroundColorAttributeName,
             [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote], NSFontAttributeName,
@@ -11226,12 +11326,8 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
 - (void) queueStatusDidChange {
 #if !AlwaysReload
     if (Queuing_) {
-        [[self navigationItem] setRightBarButtonItem:[[[UIBarButtonItem alloc]
-            initWithTitle:UCLocalize("QUEUE")
-            style:UIBarButtonItemStyleDone
-            target:self
-            action:@selector(queueButtonClicked)
-        ] autorelease]];
+        [[self navigationItem] setRightBarButtonItem:CYModernBarButtonItem(@"list.bullet.rectangle", UCLocalize("QUEUE"),
+            UIBarButtonItemStyleDone, self, @selector(queueButtonClicked))];
     } else {
         [[self navigationItem] setRightBarButtonItem:nil];
     }
@@ -11355,7 +11451,7 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
             [iconView_ setImage:icon_];
         } else {
             icon_ = [UIImage cy_symbolNamed:@"square.stack.3d.up.fill"];
-            [iconView_ setTintColor:[UIColor systemBlueColor]];
+            [iconView_ setTintColor:CYModernAccentColor()];
             [iconView_ setImage:icon_];
             if (nextURL != nil)
                 [NSThread detachNewThreadSelector:@selector(_setSource:) toTarget:self withObject:nextURL];
@@ -11372,7 +11468,7 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
     origin_ = UCLocalize("ALL_SOURCES");
     label_ = UCLocalize("ALL_SOURCES_EX");
     [detailLabel_ setTextColor:[UIColor secondaryLabelColor]];
-    [iconView_ setTintColor:[UIColor systemBlueColor]];
+    [iconView_ setTintColor:CYModernAccentColor()];
     [iconView_ setImage:icon_];
     [originLabel_ setText:origin_];
     [detailLabel_ setText:label_];
@@ -11384,10 +11480,10 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
     [self setRefreshing:YES];
 
     icon_ = [UIImage cy_symbolNamed:@"square.stack.3d.up.fill"];
-    origin_ = @"Refreshing source…";
-    label_ = @"Please wait for the source list to finish updating";
+    origin_ = CYLocalize(@"Refreshing source…");
+    label_ = CYLocalize(@"Please wait for the source list to finish updating");
     [detailLabel_ setTextColor:[UIColor secondaryLabelColor]];
-    [iconView_ setTintColor:[UIColor systemBlueColor]];
+    [iconView_ setTintColor:CYModernAccentColor()];
     [iconView_ setImage:icon_];
     [originLabel_ setText:origin_];
     [detailLabel_ setText:label_];
@@ -11431,7 +11527,7 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
         // old per-cell spinner; the small tab-bar spinner is kept separately.
         refreshBar_ = [[[UIView alloc] init] autorelease];
         [refreshBar_ setTranslatesAutoresizingMaskIntoConstraints:NO];
-        [refreshBar_ setBackgroundColor:[[UIColor systemBlueColor] colorWithAlphaComponent:0.16f]];
+        [refreshBar_ setBackgroundColor:[CYModernAccentColor() colorWithAlphaComponent:0.16f]];
         [[refreshBar_ layer] setCornerRadius:1.5f];
         [refreshBar_ setClipsToBounds:YES];
         [refreshBar_ setHidden:YES];
@@ -11440,11 +11536,7 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
         refreshShimmer_ = [CAGradientLayer layer];
         [refreshShimmer_ setStartPoint:CGPointMake(0.0f, 0.5f)];
         [refreshShimmer_ setEndPoint:CGPointMake(1.0f, 0.5f)];
-        [refreshShimmer_ setColors:[NSArray arrayWithObjects:
-            (id) [[[UIColor systemBlueColor] colorWithAlphaComponent:0.0f] CGColor],
-            (id) [[UIColor systemBlueColor] CGColor],
-            (id) [[[UIColor systemBlueColor] colorWithAlphaComponent:0.0f] CGColor],
-        nil]];
+        [self updateRefreshColors];
         [refreshShimmer_ setLocations:[NSArray arrayWithObjects:@(0.0), @(0.5), @(1.0), nil]];
         [[refreshBar_ layer] addSublayer:refreshShimmer_];
 
@@ -11467,10 +11559,24 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
         nil]];
 
         UIView *selection([[[UIView alloc] initWithFrame:CGRectZero] autorelease]);
-        [selection setBackgroundColor:[[UIColor systemBlueColor] colorWithAlphaComponent:0.12f]];
+        [selection setBackgroundColor:[CYModernAccentColor() colorWithAlphaComponent:0.12f]];
         [self setSelectedBackgroundView:selection];
 
     } return self;
+}
+
+- (void) updateRefreshColors {
+    UIColor *color([CYModernAccentColor() resolvedColorWithTraitCollection:self.traitCollection]);
+    [CATransaction begin]; [CATransaction setDisableActions:YES];
+    [refreshShimmer_ setColors:@[(id)[[color colorWithAlphaComponent:0] CGColor],
+        (id)[color CGColor], (id)[[color colorWithAlphaComponent:0] CGColor]]];
+    [CATransaction commit];
+}
+
+- (void) traitCollectionDidChange:(UITraitCollection *)previous {
+    [super traitCollectionDidChange:previous];
+    if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previous])
+        [self updateRefreshColors];
 }
 
 - (void) layoutSubviews {
@@ -11668,7 +11774,7 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
 }
 
 - (void) presentSourceStatusForSource:(Source *)source issue:(NSString *)issue {
-    NSString *title(@"Source Problem");
+    NSString *title(CYLocalize(@"Source Problem"));
     NSString *message([NSString stringWithFormat:@"%@\n\n%@\n\n%@",
         CYRepositoryIssueSummary(issue),
         CYRepositoryIssueExplanation(issue),
@@ -11676,7 +11782,7 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
 
     UIAlertController *alert([UIAlertController alertControllerWithTitle:title
         message:message preferredStyle:UIAlertControllerStyleAlert]);
-    [alert addAction:[UIAlertAction actionWithTitle:@"View Cached Packages"
+    [alert addAction:[UIAlertAction actionWithTitle:CYLocalize(@"View Cached Packages")
         style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
             [self openPackagesForSource:source];
         }]];
@@ -11847,33 +11953,19 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
     BOOL editing([list_ isEditing]);
 
     if (editing)
-        [[self navigationItem] setLeftBarButtonItem:[[[UIBarButtonItem alloc]
-            initWithTitle:UCLocalize("ADD")
-            style:UIBarButtonItemStylePlain
-            target:self
-            action:@selector(addButtonClicked)
-        ] autorelease] animated:animated];
+        [[self navigationItem] setLeftBarButtonItem:CYModernBarButtonItem(@"plus", UCLocalize("ADD"),
+            UIBarButtonItemStylePlain, self, @selector(addButtonClicked)) animated:animated];
     else if ([self.delegate updating])
-        [[self navigationItem] setLeftBarButtonItem:[[[UIBarButtonItem alloc]
-            initWithTitle:UCLocalize("CANCEL")
-            style:UIBarButtonItemStyleDone
-            target:self
-            action:@selector(cancelButtonClicked)
-        ] autorelease] animated:animated];
+        [[self navigationItem] setLeftBarButtonItem:CYModernBarButtonItem(@"xmark", UCLocalize("CANCEL"),
+            UIBarButtonItemStyleDone, self, @selector(cancelButtonClicked)) animated:animated];
     else
-        [[self navigationItem] setLeftBarButtonItem:[[[UIBarButtonItem alloc]
-            initWithTitle:UCLocalize("REFRESH")
-            style:UIBarButtonItemStylePlain
-            target:self
-            action:@selector(refreshButtonClicked)
-        ] autorelease] animated:animated];
+        [[self navigationItem] setLeftBarButtonItem:CYModernBarButtonItem(@"arrow.clockwise", UCLocalize("REFRESH"),
+            UIBarButtonItemStylePlain, self, @selector(refreshButtonClicked)) animated:animated];
 
-    [[self navigationItem] setRightBarButtonItem:[[[UIBarButtonItem alloc]
-        initWithTitle:(editing ? UCLocalize("DONE") : UCLocalize("EDIT"))
-        style:(editing ? UIBarButtonItemStyleDone : UIBarButtonItemStylePlain)
-        target:self
-        action:@selector(editButtonClicked)
-    ] autorelease] animated:animated];
+    [[self navigationItem] setRightBarButtonItem:CYModernBarButtonItem(editing ? @"checkmark" : @"pencil",
+        editing ? UCLocalize("DONE") : UCLocalize("EDIT"),
+        editing ? UIBarButtonItemStyleDone : UIBarButtonItemStylePlain,
+        self, @selector(editButtonClicked)) animated:animated];
 }
 
 - (void) loadView {
@@ -11887,7 +11979,7 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
     [(UITableView *) list_ setDataSource:self];
     [list_ setDelegate:self];
     refresh_ = [[[UIRefreshControl alloc] init] autorelease];
-    [refresh_ setTintColor:[UIColor systemBlueColor]];
+    [refresh_ setTintColor:CYModernAccentColor()];
     [refresh_ addTarget:self action:@selector(pullToRefresh) forControlEvents:UIControlEventValueChanged];
     [list_ setRefreshControl:refresh_];
 
@@ -12184,6 +12276,7 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
     bool packageTransactionActive_;
     bool sourceRefreshPendingAfterTransaction_;
     _H<NSMutableSet> queuedRequestedIdentifiers_;
+    _H<NSArray> queuedOperationsAwaitingReload_;
 }
 
 - (void) loadData;
@@ -12219,7 +12312,7 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
 
 - (void) privacyConsentAccepted {
     if (!CYStorePrivacyConsent()) {
-        [privacyConsent_ showPersistenceError:@"Cydia could not save your choice. Please try again."];
+        [privacyConsent_ showPersistenceError:CYLocalize(@"Cydia could not save your choice. Please try again.")];
         CYRootlessDiag(@"PRIVACY", @"ERROR acknowledgement persistence failed version=%ld",
             (long) CYPrivacyConsentCurrentVersion_);
         return;
@@ -12289,8 +12382,8 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
 
 - (bool) requestUpdate {
     if (packageTransactionActive_) {
-        UIAlertController *alert([UIAlertController alertControllerWithTitle:@"Package Changes Open"
-            message:@"Finish or cancel the current package changes before refreshing Sources."
+        UIAlertController *alert([UIAlertController alertControllerWithTitle:CYLocalize(@"Package Changes Open")
+            message:CYLocalize(@"Finish or cancel the current package changes before refreshing Sources.")
             preferredStyle:UIAlertControllerStyleAlert]);
         [alert addAction:[UIAlertAction actionWithTitle:CYLocalize(@"OK") style:UIAlertActionStyleDefault handler:nil]];
         UIViewController *presenter([tabbar_ presentedViewController] ?: (UIViewController *) tabbar_);
@@ -12363,10 +12456,10 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
 
     CydiaModernEssentialView *view([[[CydiaModernEssentialView alloc] initWithFrame:[[UIScreen mainScreen] bounds]] autorelease]);
     [view configureWithTitle:title
-                    message:@"Update these essential packages to keep Cydia and your jailbreak working reliably."
+                    message:CYLocalize(@"Update these essential packages to keep Cydia and your jailbreak working reliably.")
              essentialTitle:UCLocalize("UPGRADE_ESSENTIAL")
-              completeTitle:@"Upgrade All"
-                ignoreTitle:@"Not Now"
+              completeTitle:CYLocalize(@"Upgrade All")
+                ignoreTitle:CYLocalize(@"Not Now")
                      target:self
                      action:@selector(essentialUpgradeActionClicked:)];
 
@@ -12568,14 +12661,28 @@ _profile(reloadDataWithInvocation)
     // Package objects, so old in-memory marks alone are not sufficient.
     BOOL hadQueuedOperations(Queuing_ && [queuedRequestedIdentifiers_ count] != 0);
     NSArray *queuedOperations(hadQueuedOperations ?
-        [[database_ transactionOperationsForRequestedIdentifiers:queuedRequestedIdentifiers_] retain] : nil);
+        [(queuedOperationsAwaitingReload_ != nil ? (NSArray *) queuedOperationsAwaitingReload_ :
+            [database_ transactionOperationsForRequestedIdentifiers:queuedRequestedIdentifiers_]) retain] : nil);
 
     CydiaLoadingView *hud(loaded_ && !preserveVisibleController ? [self addProgressHUD] : nil);
     if (hud != nil)
         [hud setText:UCLocalize("RELOADING_DATA")];
 
     [database_ yieldToSelector:@selector(reloadDataWithInvocation:) withObject:invocation];
+    if (![database_ ready]) {
+        // No APT objects survive a failed reload. Keep explicit intent for a
+        // later retry without dereferencing or clearing an unavailable cache.
+        queuedOperationsAwaitingReload_ = queuedOperations;
+        [queuedOperations release];
+        [essential_ removeAllObjects];
+        [broken_ removeAllObjects];
+        if (hud != nil)
+            [self removeProgressHUD:hud];
+        CYRootlessDiag(@"DATABASE", @"UI reload stopped reason=model-unavailable");
+        return;
+    }
 
+    queuedOperationsAwaitingReload_ = nil;
     BOOL queueRestored(NO);
     if (hadQueuedOperations && [queuedOperations count] != 0) {
         queueRestored = [database_ restoreTransactionOperations:queuedOperations title:@"Package Queue"];
@@ -12858,6 +12965,15 @@ _end
         CYRootlessDiag(@"TRANSACTION", @"action=deferred reason=package-transaction-already-active queueMutated=0");
         return NO;
     }
+    if (![database_ ready]) {
+        UIAlertController *alert([UIAlertController alertControllerWithTitle:CYLocalize(@"Package Data Unavailable")
+            message:CYLocalize(@"Refresh Sources before making package changes.")
+            preferredStyle:UIAlertControllerStyleAlert]);
+        [alert addAction:[UIAlertAction actionWithTitle:CYLocalize(@"OK") style:UIAlertActionStyleDefault handler:nil]];
+        UIViewController *presenter([tabbar_ presentedViewController] ?: (UIViewController *) tabbar_);
+        [presenter presentViewController:alert animated:YES completion:nil];
+        return NO;
+    }
     if (![tabbar_ updating])
         packageTransactionActive_ = true;
     if (packageTransactionActive_)
@@ -12867,8 +12983,8 @@ _end
     // cache. Sileo and Zebra serialize those operations; doing the same here
     // avoids stale dependency plans and the old cancel/prepare race. Do not
     // cancel a healthy refresh or mutate the package queue underneath it.
-    UIAlertController *alert([UIAlertController alertControllerWithTitle:@"Sources Are Refreshing"
-        message:@"Please wait for the Sources indicator to finish, then try the package action again."
+    UIAlertController *alert([UIAlertController alertControllerWithTitle:CYLocalize(@"Sources Are Refreshing")
+        message:CYLocalize(@"Please wait for the Sources indicator to finish, then try the package action again.")
         preferredStyle:UIAlertControllerStyleAlert]);
     [alert addAction:[UIAlertAction actionWithTitle:CYLocalize(@"OK") style:UIAlertActionStyleDefault handler:nil]];
     UIViewController *presenter([tabbar_ presentedViewController] ?: (UIViewController *) tabbar_);
@@ -13089,6 +13205,7 @@ _end
     @synchronized (self) {
         if (clear) {
             [database_ clear];
+            queuedOperationsAwaitingReload_ = nil;
             [queuedRequestedIdentifiers_ removeAllObjects];
             Queuing_ = false;
         } else {
@@ -13506,6 +13623,7 @@ _end
 
     window_ = [[[CyteWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]] autorelease];
     [window_ setBackgroundColor:[UIColor systemGroupedBackgroundColor]];
+    [window_ setTintColor:CYModernAccentColor()];
 
     if (kCFCoreFoundationVersionNumber < 1349.56 && access("/.cydia_no_stash", F_OK) != 0) {
 
@@ -14091,7 +14209,7 @@ int main(int argc, char *argv[]) {
     // iOS 15+ rootless: firmware.sh maintains Cydia's virtual firmware
     // package metadata only. Do not couple that maintenance to the legacy
     // rootful /User compatibility symlink or attempt to repair the sealed rootfs.
-    if (version != 6) {
+    if (version != 6 || access("/var/jb/var/lib/cydia/firmware.pending", F_OK) == 0) {
         _trace();
         system("/var/jb/usr/libexec/cydia/cydo /var/jb/usr/libexec/cydia/firmware.sh");
         _trace();

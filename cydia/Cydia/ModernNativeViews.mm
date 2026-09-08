@@ -1,4 +1,4 @@
-/* Cydia 1.1.22 Rootless - complete native iOS 15+ transaction UI */
+/* Cydia 1.1.23 Rootless - complete native iOS 15+ transaction UI */
 
 #include "Cydia/ModernLocalization.h"
 #include "Cydia/ModernNativeViews.h"
@@ -87,9 +87,31 @@ static UIVisualEffectView *CYM3FloatingPanel(void) {
     return panel;
 }
 
-@interface CYM3AdaptiveButton : UIButton
+@interface CYM3AdaptiveButton : UIButton {
+    BOOL adaptsFilledForeground_;
+}
+@property(nonatomic) BOOL adaptsFilledForeground;
 @end
 @implementation CYM3AdaptiveButton
+@synthesize adaptsFilledForeground = adaptsFilledForeground_;
+- (void) setBackgroundColor:(UIColor *)background {
+    [super setBackgroundColor:background];
+    if (!adaptsFilledForeground_ || background == nil) return;
+    // Keep the standard Cydia/iOS foreground. Increased Contrast may brighten
+    // system blue in dark mode, so choose readable text against that exact fill.
+    UIColor *foreground([UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits) {
+        if (traits.accessibilityContrast != UIAccessibilityContrastHigh) return [UIColor whiteColor];
+        CGFloat red=0, green=0, blue=0, alpha=0;
+        if (![[background resolvedColorWithTraitCollection:traits] getRed:&red green:&green blue:&blue alpha:&alpha] || alpha < 0.99)
+            return [UIColor whiteColor];
+        CGFloat (^linear)(CGFloat)=^CGFloat(CGFloat value) {
+            return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4);
+        };
+        CGFloat luminance=0.2126*linear(red)+0.7152*linear(green)+0.0722*linear(blue);
+        return luminance > 0.179 ? [UIColor blackColor] : [UIColor whiteColor];
+    }]);
+    [self setTitleColor:foreground forState:UIControlStateNormal];
+}
 - (CGSize) intrinsicContentSize {
     CGSize size([super intrinsicContentSize]);
     CGFloat imageWidth([self currentImage] == nil ? 0.0f : MAX([self currentImage].size.width, CGRectGetWidth([[self imageView] bounds])));
@@ -124,8 +146,8 @@ static UIButton *CYM3FilledButton(void) {
     [button setContentVerticalAlignment:UIControlContentVerticalAlignmentCenter];
     [button setTitleEdgeInsets:UIEdgeInsetsZero];
     [button setImageEdgeInsets:UIEdgeInsetsZero];
-    [button setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    [button setBackgroundColor:[UIColor systemBlueColor]];
+    [(CYM3AdaptiveButton *)button setAdaptsFilledForeground:YES];
+    [button setBackgroundColor:CYModernPrimaryButtonColor()];
     [[button layer] setCornerRadius:14.0f];
     [[button layer] setCornerCurve:kCACornerCurveContinuous];
     return button;
@@ -157,14 +179,14 @@ static UIButton *CYM3FilledButton(void) {
         [[appIcon layer] setMasksToBounds:YES];
         [appIcon setAccessibilityLabel:@"Cydia"];
 
-        UILabel *eyebrow(CYM3Label(UIFontTextStyleCaption1, [UIColor systemBlueColor], 1));
+        UILabel *eyebrow(CYM3Label(UIFontTextStyleCaption1, CYModernAccentColor(), 1));
         [eyebrow setText:CYLocalize(@"FIRST LAUNCH")];
         [eyebrow setTextAlignment:NSTextAlignmentCenter];
         [eyebrow setFont:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption1]
             scaledFontForFont:[UIFont systemFontOfSize:12.0f weight:UIFontWeightBold]]];
 
         UILabel *title(CYM3Label(UIFontTextStyleTitle1, [UIColor labelColor], 0));
-        [title setText:@"Cydia Privacy"];
+        [title setText:CYLocalize(@"Cydia Privacy")];
         [title setTextAlignment:NSTextAlignmentCenter];
 
         UILabel *summary(CYM3Label(UIFontTextStyleBody, [UIColor secondaryLabelColor], 0));
@@ -182,14 +204,14 @@ static UIButton *CYM3FilledButton(void) {
         UIImageView *noticeIcon([[[CydiaSymbolView alloc]
             initWithImage:[UIImage cy_symbolNamed:@"lock.shield.fill"]] autorelease]);
         [noticeIcon setTranslatesAutoresizingMaskIntoConstraints:NO];
-        [noticeIcon setTintColor:[UIColor systemBlueColor]];
+        [noticeIcon setTintColor:CYModernAccentColor()];
         [noticeIcon setPreferredSymbolConfiguration:[UIImageSymbolConfiguration
             configurationWithPointSize:25.0f weight:UIImageSymbolWeightSemibold]];
 
         UILabel *noticeTitle(CYM3Label(UIFontTextStyleHeadline, [UIColor labelColor], 0));
         [noticeTitle setText:CYLocalize(@"Repository connections")];
         UILabel *noticeText(CYM3Label(UIFontTextStyleSubheadline, [UIColor secondaryLabelColor], 0));
-        [noticeText setText:@"Cydia connects to your sources for package lists and downloads. Sources receive network information and may receive device details for compatibility, accounts, and purchases."];
+        [noticeText setText:CYLocalize(@"Cydia connects to your sources for package lists and downloads. Sources receive network information and may receive device details for compatibility, accounts, and purchases.")];
 
         UIStackView *noticeCopy([[[UIStackView alloc] initWithArrangedSubviews:
             [NSArray arrayWithObjects:noticeTitle, noticeText, nil]] autorelease]);
@@ -422,7 +444,7 @@ static NSAttributedString *CYM3LegalText(NSString *visible) {
         NSRange range([visible rangeOfString:token]);
         if (range.location != NSNotFound) {
             [result addAttribute:NSFontAttributeName value:strongFont range:range];
-            [result addAttribute:NSForegroundColorAttributeName value:[UIColor systemBlueColor] range:range];
+            [result addAttribute:NSForegroundColorAttributeName value:CYModernAccentColor() range:range];
         }
     }
 
@@ -492,7 +514,7 @@ static NSAttributedString *CYM3LegalText(NSString *visible) {
     UILabel *title(CYM3Label(UIFontTextStyleTitle2, [UIColor labelColor], 0));
     [title setText:@"Cydia Installer"];
     [title setTextAlignment:NSTextAlignmentCenter];
-    UILabel *subtitle(CYM3Label(UIFontTextStyleSubheadline, [UIColor systemBlueColor], 0));
+    UILabel *subtitle(CYM3Label(UIFontTextStyleSubheadline, CYModernAccentColor(), 0));
     [subtitle setText:@"Modern Rootless"];
     [subtitle setTextAlignment:NSTextAlignmentCenter];
 
@@ -501,28 +523,28 @@ static NSAttributedString *CYM3LegalText(NSString *visible) {
     [header setAlignment:UIStackViewAlignmentCenter];
     [header setSpacing:5.0f];
 
-    UIVisualEffectView *original(CYM3AboutRow(@"shippingbox.fill", [UIColor systemBrownColor], CYLocalize(@"Original Cydia"), @"Jay Freeman (saurik)  •  SaurikIT, LLC"));
-    UIVisualEffectView *modifiedBase(CYM3AboutRow(@"wrench.and.screwdriver.fill", [UIColor systemOrangeColor], CYLocalize(@"Modified Cydia"), @"Sam Bingner"));
-    UIVisualEffectView *modern(CYM3AboutRow(@"person.crop.circle.fill", [UIColor systemBlueColor], CYLocalize(@"Modern Rootless edition"), @"BarabaDev  •  @barabadev  •  barabadev.com"));
+    UIVisualEffectView *original(CYM3AboutRow(@"shippingbox.fill", CYModernAccentColor(), CYLocalize(@"Original Cydia"), @"Jay Freeman (saurik)  •  SaurikIT, LLC"));
+    UIVisualEffectView *modifiedBase(CYM3AboutRow(@"wrench.and.screwdriver.fill", CYModernAccentColor(), CYLocalize(@"Modified Cydia"), @"Sam Bingner"));
+    UIVisualEffectView *modern(CYM3AboutRow(@"person.crop.circle.fill", CYModernAccentColor(), CYLocalize(@"Modern Rootless edition"), @"BarabaDev  •  @barabadev  •  barabadev.com"));
 
     UIStackView *credits([[[UIStackView alloc] initWithArrangedSubviews:[NSArray arrayWithObjects:original, modifiedBase, modern, nil]] autorelease]);
     [credits setAxis:UILayoutConstraintAxisVertical];
     [credits setSpacing:9.0f];
 
-    legalCopy_ = [@"Modern Rootless • BarabaDev • 7 September 2026\n\nUnofficial modified edition.\nGNU GPL v3 or later; Cytore: GNU AGPL v3 or later. Component notices included.\nSource: github.com/BarabaDev/Cydia-Rootless" copy];
+    legalCopy_ = [@"Modern Rootless • BarabaDev • 8 September 2026\n\nUnofficial modified edition.\nGNU GPL v3 or later; Cytore: GNU AGPL v3 or later. Component notices included.\nSource: github.com/BarabaDev/Cydia-Rootless" copy];
 
     UIView *legalIconTile([[[UIView alloc] init] autorelease]);
     [legalIconTile setTranslatesAutoresizingMaskIntoConstraints:NO];
-    [legalIconTile setBackgroundColor:[[UIColor systemIndigoColor] colorWithAlphaComponent:0.13f]];
+    [legalIconTile setBackgroundColor:[CYModernAccentColor() colorWithAlphaComponent:0.13f]];
     [[legalIconTile layer] setCornerRadius:12.0f];
     [[legalIconTile layer] setCornerCurve:kCACornerCurveContinuous];
     UIImageView *legalIcon([[[CydiaSymbolView alloc] initWithImage:[UIImage cy_symbolNamed:@"chevron.left.forwardslash.chevron.right"]] autorelease]);
     [legalIcon setTranslatesAutoresizingMaskIntoConstraints:NO];
-    [legalIcon setTintColor:[UIColor systemIndigoColor]];
+    [legalIcon setTintColor:CYModernAccentColor()];
     [legalIcon setPreferredSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:18.0f weight:UIImageSymbolWeightSemibold]];
     [legalIconTile addSubview:legalIcon];
 
-    UILabel *legalEyebrow(CYM3Label(UIFontTextStyleCaption2, [UIColor systemBlueColor], 0));
+    UILabel *legalEyebrow(CYM3Label(UIFontTextStyleCaption2, CYModernAccentColor(), 0));
     [legalEyebrow setText:CYLocalize(@"UNOFFICIAL • OPEN SOURCE")];
     [legalEyebrow setFont:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2]
         scaledFontForFont:[UIFont systemFontOfSize:11.0f weight:UIFontWeightBold]]];
@@ -532,12 +554,12 @@ static NSAttributedString *CYM3LegalText(NSString *visible) {
     [legalHeadings setAxis:UILayoutConstraintAxisVertical];
     [legalHeadings setSpacing:1.0f];
 
-    UILabel *licenseBadge(CYM3Label(UIFontTextStyleCaption2, [UIColor systemIndigoColor], 1));
+    UILabel *licenseBadge(CYM3Label(UIFontTextStyleCaption2, CYModernAccentColor(), 1));
     [licenseBadge setText:@"GPLv3+"];
     [licenseBadge setTextAlignment:NSTextAlignmentCenter];
     [licenseBadge setFont:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2]
         scaledFontForFont:[UIFont monospacedSystemFontOfSize:11.0f weight:UIFontWeightSemibold]]];
-    [licenseBadge setBackgroundColor:[[UIColor systemIndigoColor] colorWithAlphaComponent:0.11f]];
+    [licenseBadge setBackgroundColor:[CYModernAccentColor() colorWithAlphaComponent:0.11f]];
     [[licenseBadge layer] setCornerRadius:10.0f];
     [[licenseBadge layer] setCornerCurve:kCACornerCurveContinuous];
     [licenseBadge setClipsToBounds:YES];
@@ -562,7 +584,7 @@ static NSAttributedString *CYM3LegalText(NSString *visible) {
     [legalText_ setTextContainerInset:UIEdgeInsetsZero];
     [[legalText_ textContainer] setLineFragmentPadding:0.0f];
     [legalText_ setLinkTextAttributes:[NSDictionary dictionaryWithObjectsAndKeys:
-        [UIColor systemBlueColor], NSForegroundColorAttributeName,
+        CYModernAccentColor(), NSForegroundColorAttributeName,
         [NSNumber numberWithInteger:NSUnderlineStyleSingle], NSUnderlineStyleAttributeName,
     nil]];
     [legalText_ setAccessibilityLabel:legalCopy_];
@@ -595,7 +617,7 @@ static NSAttributedString *CYM3LegalText(NSString *visible) {
     [closeButton_ setTitle:CYLocalize(@"Done") forState:UIControlStateNormal];
     [closeButton_ setAccessibilityHint:CYLocalize(@"Returns to Home")];
     [closeButton_ addTarget:self action:@selector(closeClicked) forControlEvents:UIControlEventTouchUpInside];
-    [closeButton_ setBackgroundColor:[UIColor systemBlueColor]];
+    [closeButton_ setBackgroundColor:CYModernPrimaryButtonColor()];
     [[closeButton_ layer] setCornerRadius:17.0f];
 
     UIScrollView *scroll = [[[UIScrollView alloc] init] autorelease];
@@ -802,8 +824,9 @@ static UIButton *CYM3DestinationButton(NSString *title, NSString *glyph, UIColor
 @interface CYM3FeaturedPackageButton : UIButton {
     UIImageView *bannerImage_;
     NSString *imageURL_;
-    NSURLSessionDataTask *imageTask_;
+    BOOL launchCacheOnly_;
 }
+- (void) loadBannerIfNeeded;
 - (id) initWithPackage:(NSDictionary *)package palette:(NSUInteger)palette;
 - (void) featuredBannerDidLoad:(NSNotification *)notification;
 @end
@@ -828,6 +851,15 @@ static NSCache *CYM3FeaturedBannerCache(void) {
 }
 
 static NSMutableSet *CYM3FeaturedBannerRequests(void) {
+    static NSMutableSet *requests(nil);
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ requests = [[NSMutableSet alloc] init]; });
+    return requests;
+}
+
+// Cache-only launch cards and live Home cards share one disk lookup. A live
+// card may permit the same pending lookup to download only after consent.
+static NSMutableSet *CYM3FeaturedBannerNetworkRequests(void) {
     static NSMutableSet *requests(nil);
     static dispatch_once_t once;
     dispatch_once(&once, ^{ requests = [[NSMutableSet alloc] init]; });
@@ -865,24 +897,92 @@ static void CYM3PersistFeaturedBanner(NSString *imageURL, NSData *data) {
     [data writeToFile:CYM3FeaturedBannerDiskPath(imageURL) options:NSDataWritingAtomic error:NULL];
 }
 
-static UIImage *CYM3CachedFeaturedBanner(NSString *imageURL, NSURLRequest *request) {
-    UIImage *image([CYM3FeaturedBannerCache() objectForKey:imageURL]);
-    if (image != nil || request == nil)
-        return image;
-
-    // Never initialize NSURLCache while UIKit is constructing the first Home
-    // frame. On iOS 17 that synchronous cache lookup can hold the launch
-    // surface for more than a second. Previously downloaded artwork lives in
-    // Cydia's small direct file cache and maps without starting WebKit/CFNetwork.
-    NSData *data([NSData dataWithContentsOfFile:CYM3FeaturedBannerDiskPath(imageURL)
-        options:NSDataReadingMappedIfSafe error:NULL]);
+static UIImage *CYM3DecodeFeaturedBanner(NSData *data, CGFloat scale) {
     if ([data length] == 0 || [data length] > 5 * 1024 * 1024)
         return nil;
-    image = [UIImage imageWithData:data scale:[[UIScreen mainScreen] scale]];
-    if ([image size].width < 2.0f || [image size].height < 2.0f)
+    UIImage *image([UIImage imageWithData:data scale:scale]);
+    CGSize size([image size]);
+    CGFloat width(size.width * [image scale]), height(size.height * [image scale]);
+    // A small compressed file can still describe an enormous bitmap. Bound
+    // preparation to 4 megapixels (16 MiB RGBA), well above the banner viewport.
+    if (!isfinite(width) || !isfinite(height) || size.width < 2.0f || size.height < 2.0f ||
+        width < 2.0f || height < 2.0f || width > 8192.0f || height > 8192.0f || width * height > 4.0f * 1024.0f * 1024.0f)
         return nil;
-    [CYM3FeaturedBannerCache() setObject:image forKey:imageURL cost:[data length]];
+    // Decoding on this worker prevents the first image draw from stalling Home.
+    return [image imageByPreparingForDisplay] ?: image;
+}
+
+static UIImage *CYM3CachedFeaturedBanner(NSString *imageURL, CGFloat scale) {
+    UIImage *image([CYM3FeaturedBannerCache() objectForKey:imageURL]);
+    if (image != nil)
+        return image;
+    // The direct file cache avoids initializing NSURLCache during launch. Even
+    // local reads and image decoding run off the main thread before first paint.
+    NSData *data([NSData dataWithContentsOfFile:CYM3FeaturedBannerDiskPath(imageURL)
+        options:NSDataReadingMappedIfSafe error:NULL]);
+    image = CYM3DecodeFeaturedBanner(data, scale);
+    if (image != nil)
+        [CYM3FeaturedBannerCache() setObject:image forKey:imageURL cost:[data length]];
     return image;
+}
+
+static void CYM3FinishFeaturedBannerRequest(NSString *imageURL, UIImage *image) {
+    @synchronized (CYM3FeaturedBannerRequests()) {
+        [CYM3FeaturedBannerRequests() removeObject:imageURL];
+        [CYM3FeaturedBannerNetworkRequests() removeObject:imageURL];
+    }
+    if (image != nil)
+        [[NSNotificationCenter defaultCenter] postNotificationName:CYM3FeaturedBannerDidLoadNotification object:imageURL];
+}
+
+static void CYM3RequestFeaturedBanner(NSString *imageURL, NSURLRequest *request, CGFloat scale, BOOL allowNetwork) {
+    if (request == nil || [imageURL length] == 0 || [CYM3FeaturedBannerCache() objectForKey:imageURL] != nil)
+        return;
+    @synchronized (CYM3FeaturedBannerRequests()) {
+        if (allowNetwork)
+            [CYM3FeaturedBannerNetworkRequests() addObject:imageURL];
+        if ([CYM3FeaturedBannerRequests() containsObject:imageURL])
+            return;
+        [CYM3FeaturedBannerRequests() addObject:imageURL];
+    }
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        @autoreleasepool {
+            UIImage *cached(CYM3CachedFeaturedBanner(imageURL, scale));
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (cached != nil) {
+                    CYM3FinishFeaturedBannerRequest(imageURL, cached);
+                    return;
+                }
+                BOOL download(NO);
+                @synchronized (CYM3FeaturedBannerRequests()) {
+                    download = [CYM3FeaturedBannerNetworkRequests() containsObject:imageURL];
+                }
+                if (!download || !CydiaPrivacyConsentIsAccepted()) {
+                    CYM3FinishFeaturedBannerRequest(imageURL, nil);
+                    return;
+                }
+                // The request is shared by all looping cards, and retains no
+                // individual card or Home view while a server is slow.
+                NSURLSessionDataTask *task([[NSURLSession sharedSession] dataTaskWithRequest:request
+                    completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                        NSHTTPURLResponse *http([response isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)response : nil);
+                        UIImage *image(error == nil && [http statusCode] == 200 ? CYM3DecodeFeaturedBanner(data, scale) : nil);
+                        if (image != nil)
+                            [CYM3FeaturedBannerCache() setObject:image forKey:imageURL cost:[data length]];
+                        // Publish before persistence; disk/cache maintenance must
+                        // not delay an already downloaded banner from appearing.
+                        dispatch_async(dispatch_get_main_queue(), ^{ CYM3FinishFeaturedBannerRequest(imageURL, image); });
+                        if (image != nil) {
+                            CYM3PersistFeaturedBanner(imageURL, data);
+                            NSCachedURLResponse *persisted([[[NSCachedURLResponse alloc]
+                                initWithResponse:response data:data userInfo:nil storagePolicy:NSURLCacheStorageAllowed] autorelease]);
+                            [[NSURLCache sharedURLCache] storeCachedResponse:persisted forRequest:request];
+                        }
+                    }]);
+                [task resume];
+            });
+        }
+    });
 }
 
 @implementation CYM3FeaturedPackageButton
@@ -922,53 +1022,28 @@ static UIImage *CYM3CachedFeaturedBanner(NSString *imageURL, NSURLRequest *reque
         [self setAccessibilityLabel:label];
 
         imageURL_ = [[package objectForKey:@"imageURL"] copy];
+        launchCacheOnly_ = [[package objectForKey:@"launchCacheOnly"] boolValue];
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(featuredBannerDidLoad:)
             name:CYM3FeaturedBannerDidLoadNotification object:nil];
+        [self loadBannerIfNeeded];
+    }
+    return self;
+}
+
+- (void) loadBannerIfNeeded {
+    if ([bannerImage_ image] != nil)
+        return;
+    UIImage *cached([CYM3FeaturedBannerCache() objectForKey:imageURL_]);
+    if (cached != nil) {
+        [bannerImage_ setImage:cached];
+        [self setNeedsLayout];
+    } else {
         NSURL *url([NSURL URLWithString:imageURL_]);
         NSURLRequest *request(url == nil ? nil : [NSURLRequest requestWithURL:url
             cachePolicy:NSURLRequestReturnCacheDataElseLoad timeoutInterval:15.0]);
-        UIImage *cached(CYM3CachedFeaturedBanner(imageURL_, request));
-        BOOL launchCacheOnly([[package objectForKey:@"launchCacheOnly"] boolValue]);
-        if (cached != nil) {
-            [bannerImage_ setImage:cached];
-            [self setNeedsLayout];
-        } else if (request != nil && !launchCacheOnly && CydiaPrivacyConsentIsAccepted()) {
-            BOOL shouldLoad(NO);
-            @synchronized (CYM3FeaturedBannerRequests()) {
-                if (![CYM3FeaturedBannerRequests() containsObject:imageURL_]) {
-                    [CYM3FeaturedBannerRequests() addObject:imageURL_];
-                    shouldLoad = YES;
-                }
-            }
-            if (!shouldLoad)
-                return self;
-            imageTask_ = [[[NSURLSession sharedSession] dataTaskWithRequest:request
-                completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                    NSHTTPURLResponse *http([response isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *) response : nil);
-                    UIImage *image(nil);
-                    if (error == nil && [http statusCode] == 200 && [data length] != 0 && [data length] <= 5 * 1024 * 1024)
-                        image = [UIImage imageWithData:data scale:[[UIScreen mainScreen] scale]];
-                    if ([image size].width >= 2.0f && [image size].height >= 2.0f) {
-                        [CYM3FeaturedBannerCache() setObject:image forKey:imageURL_ cost:[data length]];
-                        CYM3PersistFeaturedBanner(imageURL_, data);
-                        NSCachedURLResponse *persisted([[[NSCachedURLResponse alloc]
-                            initWithResponse:response data:data userInfo:nil
-                            storagePolicy:NSURLCacheStorageAllowed] autorelease]);
-                        [[NSURLCache sharedURLCache] storeCachedResponse:persisted forRequest:request];
-                    }
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        @synchronized (CYM3FeaturedBannerRequests()) {
-                            [CYM3FeaturedBannerRequests() removeObject:imageURL_];
-                        }
-                        if (image != nil)
-                            [[NSNotificationCenter defaultCenter] postNotificationName:CYM3FeaturedBannerDidLoadNotification
-                                object:imageURL_];
-                    });
-                }] retain];
-            [imageTask_ resume];
-        }
+        BOOL allowNetwork(!launchCacheOnly_ && CydiaPrivacyConsentIsAccepted());
+        CYM3RequestFeaturedBanner(imageURL_, request, [[UIScreen mainScreen] scale], allowNetwork);
     }
-    return self;
 }
 
 - (void) featuredBannerDidLoad:(NSNotification *)notification {
@@ -993,8 +1068,6 @@ static UIImage *CYM3CachedFeaturedBanner(NSString *imageURL, NSURLRequest *reque
 
 - (void) dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
-    [imageTask_ cancel];
-    [imageTask_ release];
     [imageURL_ release];
     [super dealloc];
 }
@@ -1364,17 +1437,17 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
         [socialRow setDistribution:UIStackViewDistributionFillEqually];
         [socialRow setSpacing:10.0f];
 
-        UIButton *account(CYM3DestinationButton(CYLocalize(@"Manage Account"), @"sf:person.crop.circle", [UIColor systemGreenColor], 103));
+        UIButton *account(CYM3DestinationButton(CYLocalize(@"Manage Account"), @"sf:person.crop.circle", CYModernAccentColor(), 103));
         [account setAccessibilityHint:CYLocalize(@"Sign in to compatible repositories and view purchased packages")];
 
         UILabel *quickTitle(CYM3Label(UIFontTextStyleHeadline, [UIColor labelColor], 1));
         [quickTitle setText:CYLocalize(@"Quick Actions")];
         [quickTitle setLayoutMargins:UIEdgeInsetsMake(4.0f, 4.0f, 0.0f, 0.0f)];
 
-        UIButton *sources(CYM3ActionButton(CYLocalize(@"Sources"), CYLocalize(@"Repositories"), @"square.stack.3d.up", [UIColor systemBlueColor], 1, &sourcesMetric_));
-        UIButton *changes(CYM3ActionButton(CYLocalize(@"Changes"), CYLocalize(@"Updates"), @"clock.arrow.circlepath", [UIColor systemOrangeColor], 2, &changesMetric_));
-        UIButton *installed(CYM3ActionButton(CYLocalize(@"Installed"), CYLocalize(@"Your packages"), @"shippingbox", [UIColor systemGreenColor], 3, &installedMetric_));
-        UIButton *search(CYM3ActionButton(CYLocalize(@"Search"), CYLocalize(@"Find packages"), @"magnifyingglass", [UIColor systemPurpleColor], 4, &searchMetric_));
+        UIButton *sources(CYM3ActionButton(CYLocalize(@"Sources"), CYLocalize(@"Repositories"), @"square.stack.3d.up", CYModernAccentColor(), 1, &sourcesMetric_));
+        UIButton *changes(CYM3ActionButton(CYLocalize(@"Changes"), CYLocalize(@"Updates"), @"clock.arrow.circlepath", CYModernAccentColor(), 2, &changesMetric_));
+        UIButton *installed(CYM3ActionButton(CYLocalize(@"Installed"), CYLocalize(@"Your packages"), @"shippingbox", CYModernAccentColor(), 3, &installedMetric_));
+        UIButton *search(CYM3ActionButton(CYLocalize(@"Search"), CYLocalize(@"Find packages"), @"magnifyingglass", CYModernAccentColor(), 4, &searchMetric_));
         actionButtons_ = [[NSArray alloc] initWithObjects:sources, changes, installed, search, facebook, twitter, account, nil];
 
         UIStackView *firstRow([[[UIStackView alloc] initWithArrangedSubviews:[NSArray arrayWithObjects:sources, changes, nil]] autorelease]);
@@ -1409,7 +1482,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
         [featuredScroll_ addSubview:featuredStack_];
 
         UILabel *footer(CYM3Label(UIFontTextStyleFootnote, [UIColor secondaryLabelColor], 1));
-        [footer setText:@"Cydia 1.1.22"];
+        [footer setText:@"Cydia 1.1.23"];
         homeVersion_ = footer;
         [footer setTextAlignment:NSTextAlignmentCenter];
 
@@ -1615,6 +1688,13 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
     NSArray *values([NSArray arrayWithObjects:sourceText, updateText, installedText, availableText, nil]);
     for (NSUInteger index(0); index < 4 && index < [actionButtons_ count]; ++index)
         [[actionButtons_ objectAtIndex:index] setAccessibilityValue:[values objectAtIndex:index]];
+}
+
+- (void) loadFeaturedArtwork {
+    // Acceptance or a later Home refresh resumes missing artwork without
+    // rebuilding cards, reshuffling the strip, or restarting its position.
+    for (CYM3FeaturedPackageButton *card in [featuredStack_ arrangedSubviews])
+        [card loadBannerIfNeeded];
 }
 
 - (void) setFeaturedPackages:(NSArray *)packages {
@@ -1863,7 +1943,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
         UIImageView *icon([[[CydiaSymbolView alloc] initWithImage:[UIImage cy_symbolNamed:@"arrow.up.circle.fill"]] autorelease]);
         [icon setTranslatesAutoresizingMaskIntoConstraints:NO];
         [icon setContentMode:UIViewContentModeScaleAspectFit];
-        [icon setTintColor:[UIColor systemBlueColor]];
+        [icon setTintColor:CYModernAccentColor()];
         [icon setPreferredSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:40.0f weight:UIImageSymbolWeightSemibold]];
 
         UIView *iconRow([[[UIView alloc] init] autorelease]);
@@ -1879,7 +1959,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
         [essential_ setTranslatesAutoresizingMaskIntoConstraints:NO];
         [essential_ setContentEdgeInsets:UIEdgeInsetsMake(10.0f, 14.0f, 10.0f, 14.0f)];
         [essential_ setTag:1];
-        [essential_ setBackgroundColor:[[UIColor systemBlueColor] colorWithAlphaComponent:0.12f]];
+        [essential_ setBackgroundColor:[CYModernAccentColor() colorWithAlphaComponent:0.12f]];
         [[essential_ layer] setCornerRadius:14.0f];
         [[essential_ layer] setCornerCurve:kCACornerCurveContinuous];
         [[essential_ titleLabel] setFont:[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline]];
@@ -1957,6 +2037,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
     CAGradientLayer *fillLayer_;
     float progressValue_;
     BOOL indeterminate_;
+    BOOL failureTint_;
 }
 - (void) setProgressValue:(float)value animated:(BOOL)animated;
 - (void) setIndeterminate:(BOOL)indeterminate;
@@ -2048,13 +2129,21 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
     if (!indeterminate_)
         [fillLayer_ removeAnimationForKey:@"CydiaCompactProgressSweep"];
     [self setNeedsLayout];
-    [self setAccessibilityValue:indeterminate_ ? CYLocalize(@"In progress") : [NSString stringWithFormat:CYLocalize(@"%.0f percent"), progressValue_ * 100.0f]];
+    [self setAccessibilityValue:indeterminate_ ? CYLocalize(@"In progress") : CYLocalizedPercent(progressValue_)];
 }
 
 - (void) setFailureTint:(BOOL)failure {
-    UIColor *start(failure ? [UIColor systemRedColor] : [UIColor systemBlueColor]);
-    UIColor *end(failure ? [UIColor systemOrangeColor] : [UIColor systemCyanColor]);
-    [fillLayer_ setColors:[NSArray arrayWithObjects:(id) [start CGColor], (id) [end CGColor], nil]];
+    failureTint_ = failure;
+    UIColor *start([(failure ? [UIColor systemRedColor] : CYModernAccentColor()) resolvedColorWithTraitCollection:self.traitCollection]);
+    UIColor *end([(failure ? [UIColor systemOrangeColor] : CYModernPrimaryButtonColor()) resolvedColorWithTraitCollection:self.traitCollection]);
+    [CATransaction begin]; [CATransaction setDisableActions:YES];
+    [fillLayer_ setColors:@[(id)[start CGColor], (id)[end CGColor]]];
+    [CATransaction commit];
+}
+- (void) traitCollectionDidChange:(UITraitCollection *)previous {
+    [super traitCollectionDidChange:previous];
+    if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previous])
+        [self setFailureTint:failureTint_];
 }
 
 @end
@@ -2094,6 +2183,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
 - (void) toggleDetails;
 - (NSString *) readableStatus:(NSString *)message;
 - (void) updateStateAppearance;
+- (void) updateStateLayerColors;
 - (void) setRingStrokeEnd:(float)value animated:(BOOL)animated;
 @end
 
@@ -2116,13 +2206,13 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
         [scroll addSubview:canvas];
         stateIconTile_ = [[[UIView alloc] init] autorelease];
         [stateIconTile_ setTranslatesAutoresizingMaskIntoConstraints:NO];
-        [stateIconTile_ setBackgroundColor:[[UIColor systemBlueColor] colorWithAlphaComponent:0.11f]];
+        [stateIconTile_ setBackgroundColor:[CYModernAccentColor() colorWithAlphaComponent:0.11f]];
         [[stateIconTile_ layer] setCornerRadius:36.0f];
         [[stateIconTile_ layer] setCornerCurve:kCACornerCurveContinuous];
 
         stateIcon_ = [[[CydiaSymbolView alloc] initWithImage:[UIImage cy_symbolNamed:@"arrow.triangle.2.circlepath"]] autorelease];
         [stateIcon_ setTranslatesAutoresizingMaskIntoConstraints:NO];
-        [stateIcon_ setTintColor:[UIColor systemBlueColor]];
+        [stateIcon_ setTintColor:CYModernAccentColor()];
         [stateIcon_ setPreferredSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:30.0f weight:UIImageSymbolWeightSemibold]];
         // Premium App Store-style progress ring hugging the state icon: the
         // faint full track plus an accent arc whose strokeEnd follows the real
@@ -2136,14 +2226,14 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
         [ringTrack_ setFrame:CGRectMake(0.0f, 0.0f, 72.0f, 72.0f)];
         [ringTrack_ setPath:[ringPath CGPath]];
         [ringTrack_ setFillColor:[[UIColor clearColor] CGColor]];
-        [ringTrack_ setStrokeColor:[[[UIColor systemBlueColor] colorWithAlphaComponent:0.16f] CGColor]];
+        [ringTrack_ setStrokeColor:[[CYModernAccentColor() colorWithAlphaComponent:0.16f] CGColor]];
         [ringTrack_ setLineWidth:4.0f];
         [[stateIconTile_ layer] addSublayer:ringTrack_];
         progressRing_ = [CAShapeLayer layer];
         [progressRing_ setFrame:CGRectMake(0.0f, 0.0f, 72.0f, 72.0f)];
         [progressRing_ setPath:[ringPath CGPath]];
         [progressRing_ setFillColor:[[UIColor clearColor] CGColor]];
-        [progressRing_ setStrokeColor:[[UIColor systemBlueColor] CGColor]];
+        [progressRing_ setStrokeColor:[CYModernAccentColor() CGColor]];
         [progressRing_ setLineWidth:4.0f];
         [progressRing_ setLineCap:kCALineCapRound];
         [progressRing_ setStrokeEnd:0.0f];
@@ -2161,7 +2251,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
         [status_ setTextAlignment:NSTextAlignmentCenter];
 
         progressTrack_ = [[[CydiaModernProgressTrack alloc] initWithFrame:CGRectZero] autorelease];
-        phase_ = CYM3Label(UIFontTextStyleFootnote, [UIColor systemBlueColor], 0);
+        phase_ = CYM3Label(UIFontTextStyleFootnote, CYModernAccentColor(), 0);
         [phase_ setTextAlignment:NSTextAlignmentCenter];
         metrics_ = CYM3Label(UIFontTextStyleCaption1, [UIColor secondaryLabelColor], 0);
         percent_ = CYM3Label(UIFontTextStyleCaption1, [UIColor secondaryLabelColor], 1);
@@ -2193,7 +2283,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
         [lightRow addSubview:restartLights_];
         for (NSUInteger index(0); index < 3; ++index) {
             UIView *light([[[UIView alloc] init] autorelease]);
-            [light setBackgroundColor:[UIColor systemBlueColor]];
+            [light setBackgroundColor:CYModernAccentColor()];
             [[light layer] setCornerRadius:3.0];
             [light setAlpha:0.45];
             [restartLights_ addArrangedSubview:light];
@@ -2367,6 +2457,8 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
 - (void) traitCollectionDidChange:(UITraitCollection *)previous {
     [super traitCollectionDidChange:previous];
     [self updateAccessibleLayout];
+    if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previous])
+        [self updateStateLayerColors];
 }
 
 - (NSString *) readableStatus:(NSString *)message {
@@ -2393,7 +2485,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
         return CYLocalize(@"Applying changes…");
     if ([message rangeOfString:@"\n"].location != NSNotFound || [message length] > 96)
         return refreshing_ ? CYLocalize(@"Refreshing repositories…") : CYLocalize(@"Applying package changes…");
-    return message;
+    return CYLocalize(message);
 }
 
 - (void) setTransactionTitle:(NSString *)title {
@@ -2405,6 +2497,8 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
     } else if ([value caseInsensitiveCompare:@"RUNNING"] == NSOrderedSame ||
         [value caseInsensitiveCompare:@"WORKING"] == NSOrderedSame)
         value = refreshing_ ? CYLocalize(@"Refreshing Sources") : CYLocalize(@"Preparing Changes");
+    else if ([value caseInsensitiveCompare:@"REPAIRING"] == NSOrderedSame)
+        value = CYLocalize(@"Repairing");
     else if ([value caseInsensitiveCompare:@"COMPLETE"] == NSOrderedSame)
         value = refreshing_ ? CYLocalize(@"Sources Updated") : CYLocalize(@"Changes Complete");
     [title_ setText:CYLocalize(value)];
@@ -2421,7 +2515,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
     [progressTrack_ setIndeterminate:NO];
     [progressTrack_ setProgressValue:bounded animated:animated && !UIAccessibilityIsReduceMotionEnabled()];
     [self setRingStrokeEnd:bounded animated:animated];
-    [percent_ setText:[NSString stringWithFormat:@"%.0f%%", bounded * 100.0f]];
+    [percent_ setText:CYLocalizedPercent(bounded)];
 }
 
 - (void) setRingStrokeEnd:(float)value animated:(BOOL)animated {
@@ -2468,7 +2562,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
     NSMutableString *text([NSMutableString stringWithFormat:CYLocalize(@"%@ of %@"), currentText, totalText]);
     if (speed > 0.0) {
         NSString *speedText([NSByteCountFormatter stringFromByteCount:(long long) speed countStyle:NSByteCountFormatterCountStyleFile]);
-        [text appendFormat:@" · %@/s", speedText];
+        [text appendFormat:@" · %@", [NSString stringWithFormat:CYLocalize(@"%@/s"), speedText]];
     }
     [metrics_ setText:text];
 }
@@ -2535,14 +2629,22 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
 }
 
 - (void) updateStateAppearance {
-    UIColor *color(error_ ? [UIColor systemRedColor] : (cancelled_ ? [UIColor systemOrangeColor] : (running_ ? [UIColor systemBlueColor] : [UIColor systemGreenColor])));
+    UIColor *color(error_ ? [UIColor systemRedColor] : (cancelled_ ? [UIColor systemOrangeColor] : (running_ ? CYModernAccentColor() : [UIColor systemGreenColor])));
     NSString *symbol(error_ ? @"exclamationmark.triangle.fill" : (cancelled_ ? @"pause.circle.fill" : (running_ ? @"arrow.triangle.2.circlepath" : @"checkmark.circle.fill")));
     [stateIcon_ setImage:[UIImage cy_symbolNamed:symbol]];
     [stateIcon_ setTintColor:color];
     [stateIconTile_ setBackgroundColor:[color colorWithAlphaComponent:0.11f]];
     [progressTrack_ setFailureTint:error_];
+    [self updateStateLayerColors];
+}
+
+- (void) updateStateLayerColors {
+    UIColor *color([(error_ ? [UIColor systemRedColor] : (cancelled_ ? [UIColor systemOrangeColor] :
+        (running_ ? CYModernAccentColor() : [UIColor systemGreenColor]))) resolvedColorWithTraitCollection:self.traitCollection]);
+    [CATransaction begin]; [CATransaction setDisableActions:YES];
     [ringTrack_ setStrokeColor:[[color colorWithAlphaComponent:0.16f] CGColor]];
     [progressRing_ setStrokeColor:[color CGColor]];
+    [CATransaction commit];
 }
 
 - (void) setRunning:(BOOL)running {
@@ -2578,7 +2680,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
     if (!error_ && !cancelled_)
         [progressTrack_ setProgressValue:1.0f animated:YES];
     [self setRingStrokeEnd:(error_ || cancelled_ ? [progressRing_ strokeEnd] : 1.0f) animated:YES];
-    [percent_ setText:error_ || cancelled_ ? CYLocalize(@"Stopped") : @"100%"];
+    [percent_ setText:error_ || cancelled_ ? CYLocalize(@"Stopped") : CYLocalizedPercent(1.0)];
     [title_ setText:error_ ? (refreshing_ ? CYLocalize(@"Refresh Incomplete") : CYLocalize(@"Couldn’t Complete")) :
         (cancelled_ ? CYLocalize(@"Cancelled") : (refreshing_ ? CYLocalize(@"Sources Updated") : CYLocalize(@"Changes Complete")))];
     if (error_)
@@ -2598,7 +2700,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
         CYLocalizedMetric(CYLocalize(@"Details"), issueCount_)];
     [finish_ setHidden:NO];
     [finish_ setUserInteractionEnabled:YES];
-    [finish_ setBackgroundColor:error_ ? [UIColor systemRedColor] : [UIColor systemBlueColor]];
+    [finish_ setBackgroundColor:error_ ? [UIColor systemRedColor] : CYModernPrimaryButtonColor()];
 }
 
 - (void) setCancelledState:(BOOL)cancelled {
@@ -2762,6 +2864,12 @@ static UIColor *CYM3ReviewColor(BOOL card) {
 
 @interface CydiaModernConfirmationView () {
     UIVisualEffectView *summary_;
+    UIView *regularTableHeader_;
+    UIView *compactSummary_;
+    UILabel *compactTitle_;
+    UILabel *compactDetail_;
+    UILabel *compactDownload_;
+    UILabel *compactWarning_;
     UIStackView *actionContent_;
     NSLayoutConstraint *tableTop_;
     NSLayoutConstraint *tableAccessibleTop_;
@@ -2784,6 +2892,10 @@ static UIColor *CYM3ReviewColor(BOOL card) {
 @implementation CydiaModernConfirmationView
 
 - (void) dealloc {
+    [table_ setDataSource:nil];
+    [table_ setDelegate:nil];
+    [regularTableHeader_ release];
+    [compactSummary_ release];
     [sections_ release];
     [operationSymbol_ release];
     [tableTop_ release];
@@ -2837,8 +2949,31 @@ static UIColor *CYM3ReviewColor(BOOL card) {
         [table_ setEstimatedRowHeight:80.0f];
         [table_ setSectionHeaderTopPadding:0.0f];
         [table_ setContentInsetAdjustmentBehavior:UIScrollViewContentInsetAdjustmentNever];
-        [table_ setTableHeaderView:[[[UIView alloc] initWithFrame:CGRectMake(0, 0, 1, 0.01f)] autorelease]];
+        regularTableHeader_ = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 1, 0.01f)];
+        [table_ setTableHeaderView:regularTableHeader_];
         [self addSubview:table_];
+        // The compact layout scrolls the same review information with the
+        // package queue so large text never hides download sizes or warnings.
+        compactSummary_ = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 1, 1)];
+        compactTitle_ = CYM3Label(UIFontTextStyleTitle1, [UIColor labelColor], 0);
+        [compactTitle_ setAccessibilityTraits:UIAccessibilityTraitHeader];
+        compactDetail_ = CYM3Label(UIFontTextStyleSubheadline, [UIColor secondaryLabelColor], 0);
+        compactDownload_ = CYM3Label(UIFontTextStyleFootnote, [UIColor secondaryLabelColor], 0);
+        compactWarning_ = CYM3Label(UIFontTextStyleFootnote, [UIColor systemOrangeColor], 0);
+        [compactDownload_ setHidden:YES];
+        [compactWarning_ setHidden:YES];
+        UIStackView *compactLabels([[[UIStackView alloc] initWithArrangedSubviews:
+            @[compactTitle_, compactDetail_, compactDownload_, compactWarning_]] autorelease]);
+        [compactLabels setTranslatesAutoresizingMaskIntoConstraints:NO];
+        [compactLabels setAxis:UILayoutConstraintAxisVertical];
+        [compactLabels setSpacing:4.0f];
+        [compactSummary_ addSubview:compactLabels];
+        [NSLayoutConstraint activateConstraints:@[
+            [[compactLabels leadingAnchor] constraintEqualToAnchor:[compactSummary_ leadingAnchor] constant:24.0f],
+            [[compactLabels trailingAnchor] constraintEqualToAnchor:[compactSummary_ trailingAnchor] constant:-24.0f],
+            [[compactLabels topAnchor] constraintEqualToAnchor:[compactSummary_ topAnchor] constant:20.0f],
+            [[compactLabels bottomAnchor] constraintEqualToAnchor:[compactSummary_ bottomAnchor] constant:-12.0f]
+        ]];
         empty_ = CYM3Label(UIFontTextStyleBody, [UIColor secondaryLabelColor], 0);
         [empty_ setTextAlignment:NSTextAlignmentCenter];
         [empty_ setText:CYLocalize(@"Select a package to continue.")];
@@ -2902,6 +3037,18 @@ static UIColor *CYM3ReviewColor(BOOL card) {
         (height > 0.0f && height < 300.0f));
     if ([summary_ isHidden] != collapsed) [self updateAccessibleLayout];
     [super layoutSubviews];
+    if (collapsed) {
+        CGFloat width(CGRectGetWidth([table_ bounds]));
+        if (width > 0.0f) {
+            CGSize fit([compactSummary_ systemLayoutSizeFittingSize:CGSizeMake(width, 0)
+                withHorizontalFittingPriority:UILayoutPriorityRequired verticalFittingPriority:UILayoutPriorityFittingSizeLevel]);
+            if (fabs(CGRectGetWidth([compactSummary_ frame]) - width) > 0.5f ||
+                fabs(CGRectGetHeight([compactSummary_ frame]) - ceil(fit.height)) > 0.5f) {
+                [compactSummary_ setFrame:CGRectMake(0, 0, width, ceil(fit.height))];
+                [table_ setTableHeaderView:compactSummary_];
+            }
+        }
+    }
     CGFloat bottom(MAX(0.0f, CGRectGetMaxY([table_ frame]) - CGRectGetMinY([actionDock_ frame])) + 12.0f);
     if (fabs([table_ contentInset].bottom - bottom) > 0.5f) {
         [table_ setContentInset:UIEdgeInsetsMake(0, 0, bottom, 0)];
@@ -2918,6 +3065,8 @@ static UIColor *CYM3ReviewColor(BOOL card) {
     [tableTop_ setActive:NO];
     [tableAccessibleTop_ setActive:NO];
     [(collapsed ? tableAccessibleTop_ : tableTop_) setActive:YES];
+    [table_ setTableHeaderView:collapsed ? compactSummary_ : regularTableHeader_];
+    [empty_ setHidden:collapsed || [sections_ count] != 0];
     [actionDetail_ setHidden:collapsed];
     [table_ reloadData];
 }
@@ -2932,6 +3081,11 @@ static UIColor *CYM3ReviewColor(BOOL card) {
     [detail_ setText:detail];
     [download_ setText:download];
     [download_ setHidden:[download length] == 0];
+    [compactTitle_ setText:title];
+    [compactDetail_ setText:detail];
+    [compactDownload_ setText:download];
+    [compactDownload_ setHidden:[download length] == 0];
+    [self setNeedsLayout];
 }
 
 - (void) setSections:(NSArray *)sections {
@@ -2954,7 +3108,7 @@ static UIColor *CYM3ReviewColor(BOOL card) {
     }
     [sections_ release];
     sections_ = [sections copy];
-    [empty_ setHidden:[sections_ count] != 0];
+    [empty_ setHidden:[summary_ isHidden] || [sections_ count] != 0];
     [UIView performWithoutAnimation:^{
         if (!sameRows) { [table_ reloadData]; return; }
         for (NSIndexPath *path in [table_ indexPathsForVisibleRows]) {
@@ -2969,8 +3123,12 @@ static UIColor *CYM3ReviewColor(BOOL card) {
 
 - (void) setWarningText:(NSString *)warning {
     [warning_ setText:warning];
-    if ([warning length] != 0) [download_ setHidden:YES];
+    [download_ setHidden:[warning length] != 0 || [[download_ text] length] == 0];
     [warning_ setHidden:[warning length] == 0];
+    [compactWarning_ setText:warning];
+    [compactDownload_ setHidden:[download_ isHidden]];
+    [compactWarning_ setHidden:[warning_ isHidden]];
+    [self setNeedsLayout];
 }
 
 - (void) setOperationSymbol:(NSString *)symbol {
@@ -2987,14 +3145,14 @@ static UIColor *CYM3ReviewColor(BOOL card) {
         if (![[section objectForKey:@"issue"] boolValue]) packages += [[section objectForKey:@"items"] count];
     enabled = enabled && packages != 0;
     BOOL blocked(![warning_ isHidden]);
-    UIColor *color(blocked ? [UIColor systemOrangeColor] : (destructive ? [UIColor systemRedColor] : [UIColor systemBlueColor]));
+    UIColor *color(blocked ? [UIColor systemOrangeColor] : (destructive ? [UIColor systemRedColor] : CYModernAccentColor()));
     [confirm_ setTitle:title forState:UIControlStateNormal];
     [confirm_ setImage:nil forState:UIControlStateNormal];
     [confirm_ setTitleEdgeInsets:UIEdgeInsetsZero];
     [confirm_ setImageEdgeInsets:UIEdgeInsetsZero];
     [confirm_ setEnabled:enabled];
     [confirm_ setAlpha:enabled ? 1.0f : 0.45f];
-    [confirm_ setBackgroundColor:destructive ? [UIColor systemRedColor] : [UIColor systemBlueColor]];
+    [confirm_ setBackgroundColor:destructive ? [UIColor systemRedColor] : CYModernPrimaryButtonColor()];
     [icon_ setTintColor:packages == 0 && !blocked ? [UIColor secondaryLabelColor] : color];
     [iconTile_ setBackgroundColor:[color colorWithAlphaComponent:0.08f]];
     [self setOperationSymbol:destructive ? @"trash" : operationSymbol_];
@@ -3098,6 +3256,13 @@ static UIColor *CYM3ReviewColor(BOOL card) {
 - (void) setRowContent:(UIStackView *)content;
 @end
 @implementation CYM3PackageInfoButton
+- (NSString *) accessibilityLabel {
+    NSArray *content([rowContent_ arrangedSubviews]);
+    return [content count] > 1 ? [(UILabel *)[content objectAtIndex:1] text] : [super accessibilityLabel];
+}
+- (NSString *) accessibilityValue {
+    return [(UILabel *)[rowContent_ viewWithTag:7002] text];
+}
 - (void) setRowContent:(UIStackView *)content {
     rowContent_ = content;
     BOOL large(UIContentSizeCategoryIsAccessibilityCategory([[self traitCollection] preferredContentSizeCategory]));
@@ -3117,6 +3282,8 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
     [row setTranslatesAutoresizingMaskIntoConstraints:NO];
     [row setContentHorizontalAlignment:UIControlContentHorizontalAlignmentFill];
     [row setBackgroundColor:[UIColor clearColor]];
+    [row setIsAccessibilityElement:YES];
+    [row setAccessibilityTraits:disclosure ? UIAccessibilityTraitButton : UIAccessibilityTraitStaticText];
 
     UIView *iconTile([[[UIView alloc] init] autorelease]);
     [iconTile setTranslatesAutoresizingMaskIntoConstraints:NO];
@@ -3244,7 +3411,7 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
         [name_ setLineBreakMode:NSLineBreakByWordWrapping];
         identifier_ = CYM3Label(UIFontTextStyleCaption1, [UIColor secondaryLabelColor], 0);
         [identifier_ setLineBreakMode:NSLineBreakByCharWrapping];
-        version_ = CYM3Label(UIFontTextStyleSubheadline, [UIColor systemBlueColor], 0);
+        version_ = CYM3Label(UIFontTextStyleSubheadline, CYModernAccentColor(), 0);
         summary_ = CYM3Label(UIFontTextStyleBody, [UIColor secondaryLabelColor], 0);
 
         UIStackView *identity([[[UIStackView alloc] initWithArrangedSubviews:[NSArray arrayWithObjects:name_, identifier_, version_, nil]] autorelease]);
@@ -3302,10 +3469,10 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
         UILabel *informationTitle(CYM3Label(UIFontTextStyleCaption1, [UIColor secondaryLabelColor], 1));
         [informationTitle setText:CYLocalize(@"PACKAGE INFORMATION")];
         UIVisualEffectView *information(CYM3ContentCard(24.0f));
-        UIButton *repository(CYM3PackageInfoRow(@"square.stack.3d.up", [UIColor systemBlueColor], CYLocalize(@"Repository"), @"—", &repositoryValue_, NO));
-        UIButton *author(CYM3PackageInfoRow(@"person.crop.circle", [UIColor systemIndigoColor], CYLocalize(@"Author"), @"—", &authorValue_, NO));
-        UIButton *section(CYM3PackageInfoRow(@"square.grid.2x2", [UIColor systemPurpleColor], CYLocalize(@"Category"), @"—", &sectionValue_, NO));
-        UIButton *size(CYM3PackageInfoRow(@"internaldrive", [UIColor systemOrangeColor], CYLocalize(@"Installed Size"), @"—", &sizeValue_, NO));
+        UIButton *repository(CYM3PackageInfoRow(@"square.stack.3d.up", CYModernAccentColor(), CYLocalize(@"Repository"), @"—", &repositoryValue_, NO));
+        UIButton *author(CYM3PackageInfoRow(@"person.crop.circle", CYModernAccentColor(), CYLocalize(@"Author"), @"—", &authorValue_, NO));
+        UIButton *section(CYM3PackageInfoRow(@"square.grid.2x2", CYModernAccentColor(), CYLocalize(@"Category"), @"—", &sectionValue_, NO));
+        UIButton *size(CYM3PackageInfoRow(@"internaldrive", CYModernAccentColor(), CYLocalize(@"Installed Size"), @"—", &sizeValue_, NO));
         [[size viewWithTag:7001] setHidden:YES];
         UIStackView *informationRows([[[UIStackView alloc] initWithArrangedSubviews:[NSArray arrayWithObjects:repository, author, section, size, nil]] autorelease]);
         [informationRows setTranslatesAutoresizingMaskIntoConstraints:NO];
@@ -3317,7 +3484,7 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
         [manageTitle setText:CYLocalize(@"MANAGE PACKAGE")];
         UIVisualEffectView *manage(CYM3ContentCard(24.0f));
         settings_ = CYM3PackageInfoRow(@"slider.horizontal.3", [UIColor systemGrayColor], CYLocalize(@"Package Settings"), CYLocalize(@"Visibility & updates"), NULL, YES);
-        files_ = CYM3PackageInfoRow(@"folder", [UIColor systemOrangeColor], CYLocalize(@"Installed Files"), CYLocalize(@"Browse package contents"), NULL, YES);
+        files_ = CYM3PackageInfoRow(@"folder", CYModernAccentColor(), CYLocalize(@"Installed Files"), CYLocalize(@"Browse package contents"), NULL, YES);
         [[files_ viewWithTag:7001] setHidden:YES];
         UIStackView *manageRows([[[UIStackView alloc] initWithArrangedSubviews:[NSArray arrayWithObjects:settings_, files_, nil]] autorelease]);
         [manageRows setTranslatesAutoresizingMaskIntoConstraints:NO];
@@ -3338,7 +3505,7 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
         spinner_ = [[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge] autorelease];
         [spinner_ setTranslatesAutoresizingMaskIntoConstraints:NO];
         [spinner_ setHidesWhenStopped:YES];
-        [spinner_ setColor:[UIColor systemBlueColor]];
+        [spinner_ setColor:CYModernAccentColor()];
         [self addSubview:spinner_];
 
         [NSLayoutConstraint activateConstraints:[NSArray arrayWithObjects:
@@ -3463,7 +3630,7 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
         versionText = CYLocalize(@"Version unavailable");
     [version_ setText:versionText];
 
-    UIColor *stateColor(installed ? [UIColor systemGreenColor] : [UIColor systemBlueColor]);
+    UIColor *stateColor(installed ? [UIColor systemGreenColor] : CYModernAccentColor());
     [stateIcon_ setImage:[UIImage cy_symbolNamed:installed ? @"checkmark.shield.fill" : @"arrow.down.circle.fill"]];
     [stateIcon_ setTintColor:stateColor];
     [stateTile_ setBackgroundColor:[stateColor colorWithAlphaComponent:0.13f]];
@@ -3473,9 +3640,11 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
     [repositoryValue_ setText:[repository length] == 0 ? CYLocalize(@"Local") : repository];
     [authorValue_ setText:[author length] == 0 ? CYLocalize(@"Unknown author") : author];
     [sectionValue_ setText:[section length] == 0 ? CYLocalize(@"Uncategorized") : section];
-    [sizeValue_ setText:[size length] == 0 || [size isEqualToString:@"—"] ? @"Not provided" : size];
+    [sizeValue_ setText:[size length] == 0 || [size isEqualToString:@"—"] ? CYLocalize(@"Not provided") : size];
     [self setLoading:NO];
 }
+
+- (UIView *) actionSourceView { return action_; }
 
 - (void) updateHeroIcon:(UIImage *)icon {
     if (icon == nil)
@@ -3493,7 +3662,7 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
     [action_ setImage:nil forState:UIControlStateNormal];
     [action_ setTitleEdgeInsets:UIEdgeInsetsZero];
     [action_ setImageEdgeInsets:UIEdgeInsetsZero];
-    [action_ setBackgroundColor:destructive ? [UIColor systemRedColor] : [UIColor systemBlueColor]];
+    [action_ setBackgroundColor:destructive ? [UIColor systemRedColor] : CYModernPrimaryButtonColor()];
     [action_ removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
     [action_ addTarget:target action:action forControlEvents:UIControlEventTouchUpInside];
 }

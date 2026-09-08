@@ -1,4 +1,4 @@
-/* Cydia 1.1.22 Rootless - complete native iOS 15+ transaction UI */
+/* Cydia 1.1.23 Rootless - complete native iOS 15+ transaction UI */
 
 #ifndef Cydia_ModernNativeViews_H
 #define Cydia_ModernNativeViews_H
@@ -38,6 +38,7 @@ BOOL CydiaPrivacyConsentIsAccepted(void);
                     installedCount:(NSUInteger)installed
                     availableCount:(NSUInteger)available;
 - (void) setFeaturedPackages:(NSArray *)packages;
+- (void) loadFeaturedArtwork;
 - (void) continueFeaturedPositionFromView:(CydiaModernHomeView *)home;
 - (void) setFullScreenControlsVisible:(BOOL)visible animated:(BOOL)animated target:(id)target action:(SEL)action;
 
@@ -107,6 +108,7 @@ typedef NS_ENUM(NSUInteger, CydiaRestartKind) {
 - (void) setActionTitle:(NSString *)title destructive:(BOOL)destructive target:(id)target action:(SEL)action;
 - (void) setNavigationTarget:(id)target settingsAction:(SEL)settingsAction filesAction:(SEL)filesAction showFiles:(BOOL)showFiles;
 - (void) updateHeroIcon:(UIImage *)icon;
+- (UIView *) actionSourceView;
 
 @end
 

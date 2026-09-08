@@ -22,6 +22,8 @@ if [[ -L "$output" ]]; then
     fi
 fi
 mkdir -p "$(dirname "$output")"
+output_directory="$(cd "$(dirname "$output")" && pwd)"
+output="$output_directory/$(basename "$output")"
 
 stage="$(mktemp -d "${TMPDIR:-/tmp}/cydia-deb.XXXXXX")"
 cleanup() {
@@ -54,6 +56,6 @@ xz -9e -c "$stage/data.tar" >"$stage/data.tar.xz"
 rm -f "$output"
 (
     cd "$stage"
-    ar -rcS "$OLDPWD/$output" debian-binary control.tar.xz data.tar.xz
+    ar -rcS "$output" debian-binary control.tar.xz data.tar.xz
 )
 dpkg-deb --info "$output" >/dev/null

@@ -68,7 +68,7 @@
         [container_ setBackgroundColor:[UIColor clearColor]];
 
         spinner_ = [[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge] autorelease];
-        [spinner_ setColor:[UIColor systemBlueColor]];
+        [spinner_ setColor:CYModernAccentColor()];
         [spinner_ setHidesWhenStopped:YES];
         [spinner_ startAnimating];
         [container_ addSubview:spinner_];

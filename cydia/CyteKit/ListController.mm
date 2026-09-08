@@ -167,7 +167,7 @@ static CGFloat CYStatusBarHeight() {
 
     if ([self supportsPullToRefresh]) {
         refresh_ = [[[UIRefreshControl alloc] init] autorelease];
-        [refresh_ setTintColor:[UIColor systemBlueColor]];
+        [refresh_ setTintColor:CYModernAccentColor()];
         [refresh_ addTarget:self action:@selector(pullToRefresh) forControlEvents:UIControlEventValueChanged];
         [list_ setRefreshControl:refresh_];
     }

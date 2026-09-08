@@ -71,7 +71,7 @@
         [self.content setOpaque:NO];
 
         UIView *selection([[[UIView alloc] initWithFrame:bounds] autorelease]);
-        [selection setBackgroundColor:[[UIColor systemBlueColor] colorWithAlphaComponent:0.12f]];
+        [selection setBackgroundColor:[CYModernAccentColor() colorWithAlphaComponent:0.12f]];
         [self setSelectedBackgroundView:selection];
     } return self;
 }

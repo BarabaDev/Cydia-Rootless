@@ -10,6 +10,15 @@ static inline NSString *CYLocalize(NSString *source) {
         value:source table:nil];
 }
 
+// Percent symbols, digits, and spacing follow the user's locale.
+static inline NSString *CYLocalizedPercent(double value) {
+    NSNumberFormatter *formatter([[[NSNumberFormatter alloc] init] autorelease]);
+    [formatter setNumberStyle:NSNumberFormatterPercentStyle];
+    [formatter setMaximumFractionDigits:0];
+    [formatter setLocale:[NSLocale currentLocale]];
+    return [formatter stringFromNumber:@(value)];
+}
+
 // A label and formatted count avoid constructing English plurals with "s".
 static inline NSString *CYLocalizedMetric(NSString *label, NSUInteger count) {
     NSNumberFormatter *formatter([[[NSNumberFormatter alloc] init] autorelease]);

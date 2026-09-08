@@ -165,7 +165,7 @@
     BOOL folder = [row[@"directory"] boolValue], open = [expanded_ containsObject:row[@"path"]];
     NSString *extension = [row[@"name"] pathExtension].lowercaseString;
     UIColor *tint = [UIColor secondaryLabelColor]; NSString *symbol = @"doc.text";
-    if (folder) { tint = [UIColor systemBlueColor]; symbol = open ? @"folder.fill" : @"folder"; }
+    if (folder) { tint = CYModernAccentColor(); symbol = open ? @"folder.fill" : @"folder"; }
     else if ([@[@"png",@"jpg",@"jpeg",@"webp",@"heic",@"svg",@"gif"] containsObject:extension]) { tint = [UIColor systemPurpleColor]; symbol = @"photo"; }
     else if ([@[@"plist",@"json",@"xml",@"strings",@"css",@"js",@"html"] containsObject:extension]) { tint = [UIColor systemOrangeColor]; symbol = @"doc.text"; }
     else if ([@[@"dylib",@"a",@"so"] containsObject:extension] || extension.length == 0) { tint = [UIColor systemIndigoColor]; symbol = @"terminal"; }

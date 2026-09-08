@@ -8,13 +8,17 @@ fi
 
 /var/jb/usr/libexec/cydia/firmware.sh
 
+shopt -s nullglob
 debs=(/var/root/Media/Cydia/AutoInstall/*.deb)
 if [[ ${#debs[@]} -ne 0 && -f ${debs[0]} ]]; then
-    dpkg -i "${debs[@]}" 2>/tmp/dpkg.log 1>&2
-    rm -f "${debs[@]}"
-    cache=
+    if dpkg -i -- "${debs[@]}" 2>/tmp/dpkg.log 1>&2; then
+        rm -f -- "${debs[@]}"
+        killall -9 Lowtide AppleTV
+    else
+        printf '%s\n' 'Cydia AutoInstall failed; package archives were kept for retry. See /tmp/dpkg.log.' >&2
+    fi
 
-    killall -9 Lowtide AppleTV
+    cache=
 fi
 
 if [[ ${cache+@} ]]; then

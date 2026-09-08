@@ -1,7 +1,8 @@
-/* Cydia 1.1.22 - modern rootless appearance layer for iOS 15+ */
+/* Cydia 1.1.23 - modern rootless appearance layer for iOS 15+ */
 
 #include "CyteKit/UCPlatform.h"
 #include "CyteKit/ModernAppearance.h"
+#include "Cydia/ModernLocalization.h"
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 
@@ -115,13 +116,9 @@
     [self stopMotion];
     if (!refreshing_ || [self window] == nil)
         return;
-    // Eighteen vivid hues, shuffled once per refresh/foreground transition.
-    // Core Animation interpolates colours; no timer, flashing or frame loop.
-    NSMutableArray *palette([NSMutableArray array]);
-    for (NSUInteger index = 0; index < 18; ++index)
-        [palette addObject:[UIColor colorWithHue:(CGFloat)index / 18.0 saturation:0.94 brightness:1 alpha:1]];
-    for (NSUInteger remaining = [palette count]; remaining > 1; --remaining)
-        [palette exchangeObjectAtIndex:remaining - 1 withObjectAtIndex:arc4random_uniform((uint32_t)remaining)];
+    // Original Cydia uses the platform's blue tint. Vary intensity only.
+    UIColor *blue([CYModernAccentColor() resolvedColorWithTraitCollection:self.traitCollection]);
+    NSArray *palette(@[blue, [blue colorWithAlphaComponent:0.75], blue]);
     NSMutableArray *frames([NSMutableArray array]);
     for (NSUInteger index = 0; index < [palette count]; ++index) {
         UIColor *color([palette objectAtIndex:index]);
@@ -154,6 +151,11 @@
 - (void) didMoveToWindow {
     [super didMoveToWindow];
     [self refreshMotion];
+}
+- (void) traitCollectionDidChange:(UITraitCollection *)previous {
+    [super traitCollectionDidChange:previous];
+    if ([self.traitCollection hasDifferentColorAppearanceComparedToTraitCollection:previous])
+        [self refreshMotion];
 }
 - (void) setRefreshing:(BOOL)refreshing {
     if (refreshing_ == refreshing)
@@ -213,7 +215,7 @@
     [symbolView_ setHidden:loading];
     [self setEnabled:!loading];
     [self setAccessibilityTraits:UIAccessibilityTraitButton | (loading ? UIAccessibilityTraitNotEnabled : 0)];
-    [self setAccessibilityValue:loading ? @"Refreshing" : nil];
+    [self setAccessibilityValue:loading ? CYLocalize(@"Refreshing") : nil];
     [activity_ setColor:[self tintColor]];
     if (loading)
         [activity_ startAnimating];
@@ -250,7 +252,13 @@
 }
 @end
 
-static UIColor *CYAccentColor() {
+UIColor *CYModernAccentColor(void) {
+    // Upstream Cydia leaves navigation and action tint to UIKit. Use the same
+    // system blue, including its dark-appearance and increased-contrast variants.
+    return [UIColor systemBlueColor];
+}
+
+UIColor *CYModernPrimaryButtonColor(void) {
     return [UIColor systemBlueColor];
 }
 
@@ -302,11 +310,11 @@ void CYModernizeNavigationController(UINavigationController *navigation) {
     [bar setScrollEdgeAppearance:appearance];
     [bar setCompactScrollEdgeAppearance:appearance];
     [bar setPrefersLargeTitles:YES];
-    [bar setTintColor:CYAccentColor()];
+    [bar setTintColor:CYModernAccentColor()];
     [bar setBarStyle:UIBarStyleDefault];
     [bar setTitleTextAttributes:nil];
 
-    [[navigation toolbar] setTintColor:CYAccentColor()];
+    [[navigation toolbar] setTintColor:CYModernAccentColor()];
 }
 
 void CYModernizeDarkNavigationController(UINavigationController *navigation) {
@@ -320,7 +328,7 @@ void CYModernizeDarkNavigationController(UINavigationController *navigation) {
     [bar setCompactAppearance:appearance];
     [bar setScrollEdgeAppearance:appearance];
     [bar setCompactScrollEdgeAppearance:appearance];
-    [bar setTintColor:CYAccentColor()];
+    [bar setTintColor:CYModernAccentColor()];
     [bar setBarStyle:UIBarStyleBlack];
 }
 
@@ -331,7 +339,7 @@ void CYApplyModernAppearance(void) {
     [navigation setCompactAppearance:navigationAppearance];
     [navigation setScrollEdgeAppearance:navigationAppearance];
     [navigation setCompactScrollEdgeAppearance:navigationAppearance];
-    [navigation setTintColor:CYAccentColor()];
+    [navigation setTintColor:CYModernAccentColor()];
 
     UITabBarAppearance *tabAppearance([[[UITabBarAppearance alloc] init] autorelease]);
     [tabAppearance configureWithDefaultBackground];
@@ -343,19 +351,22 @@ void CYApplyModernAppearance(void) {
     [[items normal] setIconColor:[UIColor secondaryLabelColor]];
     [[items normal] setTitleTextAttributes:[NSDictionary dictionaryWithObject:[UIColor secondaryLabelColor]
         forKey:NSForegroundColorAttributeName]];
-    [[items selected] setIconColor:CYAccentColor()];
-    [[items selected] setTitleTextAttributes:[NSDictionary dictionaryWithObject:CYAccentColor()
+    [[items selected] setIconColor:CYModernAccentColor()];
+    [[items selected] setTitleTextAttributes:[NSDictionary dictionaryWithObject:CYModernAccentColor()
         forKey:NSForegroundColorAttributeName]];
+
+    [tabAppearance setInlineLayoutAppearance:items];
+    [tabAppearance setCompactInlineLayoutAppearance:items];
 
     UITabBar *tab([UITabBar appearance]);
     [tab setStandardAppearance:tabAppearance];
     [tab setScrollEdgeAppearance:tabAppearance];
-    [tab setTintColor:CYAccentColor()];
+    [tab setTintColor:CYModernAccentColor()];
     [tab setUnselectedItemTintColor:[UIColor secondaryLabelColor]];
 
-    [[UIBarButtonItem appearance] setTintColor:CYAccentColor()];
-    [[UISwitch appearance] setOnTintColor:CYAccentColor()];
-    [[UIProgressView appearance] setProgressTintColor:CYAccentColor()];
+    [[UIBarButtonItem appearance] setTintColor:CYModernAccentColor()];
+    [[UISwitch appearance] setOnTintColor:CYModernAccentColor()];
+    [[UIProgressView appearance] setProgressTintColor:CYModernAccentColor()];
 }
 
 void CYModernizeTableView(UITableView *table) {
@@ -364,7 +375,7 @@ void CYModernizeTableView(UITableView *table) {
 
     [table setBackgroundColor:[UIColor systemGroupedBackgroundColor]];
     [table setSeparatorColor:[UIColor separatorColor]];
-    [table setSectionIndexColor:CYAccentColor()];
+    [table setSectionIndexColor:CYModernAccentColor()];
     [table setSectionIndexBackgroundColor:[UIColor clearColor]];
     [table setKeyboardDismissMode:UIScrollViewKeyboardDismissModeInteractive];
     [table setCellLayoutMarginsFollowReadableWidth:YES];
@@ -373,6 +384,14 @@ void CYModernizeTableView(UITableView *table) {
 
 UITableViewStyle CYModernGroupedTableStyle(void) {
     return UITableViewStyleInsetGrouped;
+}
+
+UIBarButtonItem *CYModernBarButtonItem(NSString *symbol, NSString *label,
+    UIBarButtonItemStyle style, id target, SEL action) {
+    UIBarButtonItem *item([[[UIBarButtonItem alloc] initWithImage:[UIImage cy_symbolNamed:symbol]
+        style:style target:target action:action] autorelease]);
+    [item setAccessibilityLabel:label];
+    return item;
 }
 
 UIImage *CYModernTabImage(NSString *identifier, BOOL selected) {
@@ -405,10 +424,32 @@ UIColor *CYModernSecondaryLabelColor(void) {
 }
 
 UIColor *CYModernCommercialColor(void) {
-    return [UIColor systemPurpleColor];
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits) {
+        // Upstream Purple_ is RGB(0, 0, 0.7), a deep blue rather than purple.
+        return traits.userInterfaceStyle == UIUserInterfaceStyleDark ?
+            [[UIColor systemBlueColor] resolvedColorWithTraitCollection:traits] :
+            [UIColor colorWithRed:0.0 green:0.0 blue:0.7 alpha:1.0];
+    }];
+}
+
+UIColor *CYModernPackageDescriptionColor(BOOL commercial) {
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits) {
+        if (traits.userInterfaceStyle == UIUserInterfaceStyleDark)
+            return [[UIColor secondaryLabelColor] resolvedColorWithTraitCollection:traits];
+        // Upstream uses Purplish_ for commercial descriptions and Gray_ otherwise.
+        return commercial ? [UIColor colorWithRed:0.4 green:0.4 blue:0.8 alpha:1.0] :
+            [UIColor colorWithRed:0.4 green:0.4 blue:0.4 alpha:1.0];
+    }];
 }
 
 UIColor *CYModernQueuedColor(BOOL removing) {
-    UIColor *color(removing ? [UIColor systemRedColor] : [UIColor systemGreenColor]);
-    return [color colorWithAlphaComponent:0.16f];
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits) {
+        if (traits.userInterfaceStyle == UIUserInterfaceStyleDark) {
+            UIColor *color(removing ? [UIColor systemRedColor] : [UIColor systemGreenColor]);
+            return [[color resolvedColorWithTraitCollection:traits] colorWithAlphaComponent:0.16f];
+        }
+        // Preserve upstream InstallingColor_ and RemovingColor_ exactly in light mode.
+        return removing ? [UIColor colorWithRed:1.0 green:0.88 blue:0.88 alpha:1.0] :
+            [UIColor colorWithRed:0.88 green:1.0 blue:0.88 alpha:1.0];
+    }];
 }

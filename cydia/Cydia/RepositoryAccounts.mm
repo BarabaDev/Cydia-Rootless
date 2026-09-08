@@ -1,4 +1,4 @@
-/* Cydia 1.1.22 Rootless - repository accounts compatible with Sileo's API. */
+/* Cydia 1.1.23 Rootless - repository accounts compatible with Sileo's API. */
 
 #include "Cydia/ModernLocalization.h"
 #include "Cydia/RepositoryAccounts.h"
@@ -87,7 +87,7 @@ static NSData *CYRepositoryRequest(NSURL *url, NSString *method, NSDictionary *b
 
     NSMutableURLRequest *request([NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:20.0]);
     [request setHTTPMethod:method ?: @"GET"];
-    [request setValue:@"Cydia/1.1.22" forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"Cydia/1.1.23" forHTTPHeaderField:@"User-Agent"];
     [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
     if (body != nil) {
         NSError *jsonError(nil);
@@ -248,21 +248,49 @@ static BOOL CYValidRepositoryCredential(NSString *credential, NSUInteger maximum
     return [trimmed rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location == NSNotFound;
 }
 
-static NSString *CYRepositoryToken(NSURL *provider) {
+// Serialize credential snapshots and mutations. Generations also distinguish a
+// fresh sign-in that happens to return the same token as an older request.
+static NSMutableDictionary *CYRepositoryCredentialGenerations(void) {
+    static NSMutableDictionary *generations;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ generations = [[NSMutableDictionary alloc] init]; });
+    return generations;
+}
+
+static NSUInteger CYRepositoryCredentialsGeneration_;
+
+static NSUInteger CYRepositoryCredentialsGeneration(void) {
+    @synchronized (CYRepositoryCredentialGenerations()) {
+        return CYRepositoryCredentialsGeneration_;
+    }
+}
+
+static void CYAdvanceRepositoryCredentialsGeneration(NSURL *provider) {
+    // Called while holding the shared credential lock.
+    [CYRepositoryCredentialGenerations() setObject:@(++CYRepositoryCredentialsGeneration_)
+        forKey:[provider absoluteString]];
+}
+
+static NSString *CYRepositoryToken(NSURL *provider, NSUInteger *generation = NULL) {
+    if (generation != NULL) *generation = 0;
     if (!CYValidHTTPSURL(provider))
         return nil;
-    NSMutableDictionary *query(CYKeychainQuery(provider, CYRepositoryAccountKeychainService));
-    [query setObject:(id) kCFBooleanTrue forKey:(id) kSecReturnData];
-    [query setObject:(id) kSecMatchLimitOne forKey:(id) kSecMatchLimit];
-    CFTypeRef result(NULL);
-    OSStatus status(SecItemCopyMatching((CFDictionaryRef) query, &result));
-    if (status != errSecSuccess || result == NULL)
-        return nil;
-    NSData *data([(NSData *) result autorelease]);
-    NSString *token([[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease]);
-    if (!CYValidRepositoryCredential(token, 4096))
-        return nil;
-    return [token stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    @synchronized (CYRepositoryCredentialGenerations()) {
+        if (generation != NULL)
+            *generation = [[CYRepositoryCredentialGenerations() objectForKey:[provider absoluteString]] unsignedIntegerValue];
+        NSMutableDictionary *query(CYKeychainQuery(provider, CYRepositoryAccountKeychainService));
+        [query setObject:(id) kCFBooleanTrue forKey:(id) kSecReturnData];
+        [query setObject:(id) kSecMatchLimitOne forKey:(id) kSecMatchLimit];
+        CFTypeRef result(NULL);
+        OSStatus status(SecItemCopyMatching((CFDictionaryRef) query, &result));
+        if (status != errSecSuccess || result == NULL)
+            return nil;
+        NSData *data([(NSData *) result autorelease]);
+        NSString *token([[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease]);
+        if (!CYValidRepositoryCredential(token, 4096))
+            return nil;
+        return [token stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    }
 }
 
 static NSString *CYRepositorySecret(NSURL *provider) {
@@ -289,24 +317,28 @@ static BOOL CYStoreRepositoryCredential(NSURL *provider, NSString *credential, N
             *error = CYAccountError(CYRepositoryAccountErrorResponse, CYLocalize(@"The repository returned an invalid account credential."));
         return NO;
     }
-    NSString *normalized([credential stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
-    NSData *data([normalized dataUsingEncoding:NSUTF8StringEncoding]);
-    NSMutableDictionary *query(CYKeychainQuery(provider, service));
-    NSDictionary *update([NSDictionary dictionaryWithObjectsAndKeys:
-        data, (id) kSecValueData,
-        (id) accessibility, (id) kSecAttrAccessible,
-    nil]);
-    OSStatus status(SecItemUpdate((CFDictionaryRef) query, (CFDictionaryRef) update));
-    if (status == errSecItemNotFound) {
-        [query addEntriesFromDictionary:update];
-        status = SecItemAdd((CFDictionaryRef) query, NULL);
+    @synchronized (CYRepositoryCredentialGenerations()) {
+        NSString *normalized([credential stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+        NSData *data([normalized dataUsingEncoding:NSUTF8StringEncoding]);
+        NSMutableDictionary *query(CYKeychainQuery(provider, service));
+        NSDictionary *update([NSDictionary dictionaryWithObjectsAndKeys:
+            data, (id) kSecValueData,
+            (id) accessibility, (id) kSecAttrAccessible,
+        nil]);
+        OSStatus status(SecItemUpdate((CFDictionaryRef) query, (CFDictionaryRef) update));
+        if (status == errSecItemNotFound) {
+            [query addEntriesFromDictionary:update];
+            status = SecItemAdd((CFDictionaryRef) query, NULL);
+        }
+        if (status != errSecSuccess) {
+            if (error != NULL)
+                *error = CYAccountError(CYRepositoryAccountErrorKeychain, CYLocalize(@"The sign-in token could not be saved in Keychain."));
+            return NO;
+        }
+        if ([service isEqualToString:CYRepositoryAccountKeychainService])
+            CYAdvanceRepositoryCredentialsGeneration(provider);
+        return YES;
     }
-    if (status != errSecSuccess) {
-        if (error != NULL)
-            *error = CYAccountError(CYRepositoryAccountErrorKeychain, CYLocalize(@"The sign-in token could not be saved in Keychain."));
-        return NO;
-    }
-    return YES;
 }
 
 static BOOL CYStoreRepositoryToken(NSURL *provider, NSString *token, NSError **error) {
@@ -321,8 +353,23 @@ static BOOL CYStoreRepositoryPaymentSecret(NSURL *provider, NSString *secret, NS
 
 static void CYDeleteRepositoryToken(NSURL *provider) {
     if (CYValidHTTPSURL(provider)) {
-        SecItemDelete((CFDictionaryRef) CYKeychainQuery(provider, CYRepositoryAccountKeychainService));
-        SecItemDelete((CFDictionaryRef) CYKeychainQuery(provider, CYRepositoryAccountSecretKeychainService));
+        @synchronized (CYRepositoryCredentialGenerations()) {
+            OSStatus tokenStatus(SecItemDelete((CFDictionaryRef) CYKeychainQuery(provider, CYRepositoryAccountKeychainService)));
+            OSStatus secretStatus(SecItemDelete((CFDictionaryRef) CYKeychainQuery(provider, CYRepositoryAccountSecretKeychainService)));
+            if (tokenStatus == errSecSuccess || secretStatus == errSecSuccess)
+                CYAdvanceRepositoryCredentialsGeneration(provider);
+        }
+    }
+}
+
+static BOOL CYDeleteRepositoryTokenIfUnchanged(NSURL *provider, NSString *token, NSUInteger generation) {
+    @synchronized (CYRepositoryCredentialGenerations()) {
+        NSUInteger currentGeneration;
+        NSString *current(CYRepositoryToken(provider, &currentGeneration));
+        if (generation != currentGeneration || ![current isEqualToString:token])
+            return NO;
+        CYDeleteRepositoryToken(provider);
+        return YES;
     }
 }
 
@@ -376,7 +423,8 @@ NSString *CYRepositoryAuthorizedDownloadURL(
     NSURL *provider(CYRepositoryPaymentProvider(repositoryURL, error));
     if (provider == nil)
         return nil;
-    NSString *token(CYRepositoryToken(provider));
+    NSUInteger credentialGeneration;
+    NSString *token(CYRepositoryToken(provider, &credentialGeneration));
     if ([token length] == 0) {
         if (error != NULL)
             *error = CYAccountError(CYRepositoryAccountErrorNotSignedIn, CYLocalize(@"Sign in through Manage Account first."));
@@ -396,7 +444,7 @@ NSString *CYRepositoryAuthorizedDownloadURL(
     NSDictionary *response(CYRepositoryJSON(packageEndpoint, @"POST", body, &authorizeError));
     if (response == nil) {
         if (CYAccountErrorRequestsInvalidation(authorizeError))
-            CYDeleteRepositoryToken(provider);
+            CYDeleteRepositoryTokenIfUnchanged(provider, token, credentialGeneration);
         if (error != NULL)
             *error = authorizeError ?: CYAccountError(CYRepositoryAccountErrorResponse, CYLocalize(@"The repository did not authorize this download."));
         return nil;
@@ -426,7 +474,8 @@ NSDictionary *CYRepositoryPackageInfo(
     NSURL *provider(CYRepositoryPaymentProvider(repositoryURL, error));
     if (provider == nil)
         return nil;
-    NSString *token(CYRepositoryToken(provider));
+    NSUInteger credentialGeneration;
+    NSString *token(CYRepositoryToken(provider, &credentialGeneration));
     if ([token length] == 0) {
         if (error != NULL)
             *error = CYAccountError(CYRepositoryAccountErrorNotSignedIn, CYLocalize(@"Sign in through Manage Account first."));
@@ -442,7 +491,7 @@ NSDictionary *CYRepositoryPackageInfo(
     NSDictionary *response(CYRepositoryJSON(endpoint, @"POST", body, &infoError));
     if (response == nil) {
         if (CYAccountErrorRequestsInvalidation(infoError))
-            CYDeleteRepositoryToken(provider);
+            CYDeleteRepositoryTokenIfUnchanged(provider, token, credentialGeneration);
         if (error != NULL)
             *error = infoError;
         return nil;
@@ -475,7 +524,8 @@ NSInteger CYRepositoryPurchase(
     NSURL *provider(CYRepositoryPaymentProvider(repositoryURL, error));
     if (provider == nil)
         return CYRepositoryPurchaseFailed;
-    NSString *token(CYRepositoryToken(provider));
+    NSUInteger credentialGeneration;
+    NSString *token(CYRepositoryToken(provider, &credentialGeneration));
     if ([token length] == 0) {
         if (error != NULL)
             *error = CYAccountError(CYRepositoryAccountErrorNotSignedIn, CYLocalize(@"Sign in through Manage Account first."));
@@ -532,7 +582,7 @@ NSInteger CYRepositoryPurchase(
     NSDictionary *response(CYRepositoryJSON(endpoint, @"POST", body, &purchaseError));
     if (response == nil) {
         if (CYAccountErrorRequestsInvalidation(purchaseError))
-            CYDeleteRepositoryToken(provider);
+            CYDeleteRepositoryTokenIfUnchanged(provider, token, credentialGeneration);
         if (error != NULL)
             *error = purchaseError ?: CYAccountError(CYRepositoryAccountErrorResponse, CYLocalize(@"The purchase could not be completed."));
         return CYRepositoryPurchaseFailed;
@@ -711,7 +761,7 @@ static UIListContentConfiguration *CYRepositoryRow(NSString *title, NSString *su
         BOOL searching([[[searchController_ searchBar] text] length] != 0);
         [cell setContentConfiguration:CYRepositoryRow(searching ? CYLocalize(@"No matching purchases") : CYLocalize(@"No packages available"),
             searching ? CYLocalize(@"Try another name or package identifier.") : CYLocalize(@"Refresh Sources to check this repository again."),
-            [UIImage cy_symbolNamed:searching ? @"magnifyingglass" : @"bag"], [UIColor systemBlueColor])];
+            [UIImage cy_symbolNamed:searching ? @"magnifyingglass" : @"bag"], CYModernAccentColor())];
         [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
         return cell;
     }
@@ -721,7 +771,7 @@ static UIListContentConfiguration *CYRepositoryRow(NSString *title, NSString *su
     UIImage *icon([info objectForKey:@"icon"]);
     [cell setContentConfiguration:CYRepositoryRow([info objectForKey:@"name"] ?: identifier,
         [info objectForKey:@"summary"] ?: [NSString stringWithFormat:CYLocalize(@"Purchased from %@"), providerName_],
-        icon, icon == nil ? [UIColor systemBlueColor] : nil)];
+        icon, icon == nil ? CYModernAccentColor() : nil)];
     [cell setSelectionStyle:UITableViewCellSelectionStyleDefault];
     if ([[info objectForKey:@"installed"] boolValue]) {
         UIImageView *check([[[CydiaSymbolView alloc] initWithImage:[UIImage cy_symbolNamed:@"checkmark.circle.fill"]] autorelease]);
@@ -764,6 +814,8 @@ static UIListContentConfiguration *CYRepositoryRow(NSString *title, NSString *su
     ASWebAuthenticationSession *authenticationSession_;
     NSURL *authenticatingProvider_;
     BOOL loading_;
+    BOOL reloadPending_;
+    NSUInteger accountLoadGeneration_;
     NSUInteger authenticationGeneration_;
 }
 
@@ -817,7 +869,7 @@ static UIListContentConfiguration *CYRepositoryRow(NSString *title, NSString *su
 
     UIView *header([[[UIView alloc] initWithFrame:CGRectMake(0,0,320,130)] autorelease]);
     UIImageView *icon([[[CydiaSymbolView alloc] initWithImage:CYRepositoryArtwork(
-        [UIImage cy_symbolNamed:@"person.crop.circle.badge.checkmark"], [UIColor systemBlueColor])] autorelease]);
+        [UIImage cy_symbolNamed:@"person.crop.circle.badge.checkmark"], CYModernAccentColor())] autorelease]);
     [icon setTranslatesAutoresizingMaskIntoConstraints:NO];
     UILabel *title([[[UILabel alloc] init] autorelease]);
     [title setFont:[UIFont preferredFontForTextStyle:UIFontTextStyleTitle2]];
@@ -871,9 +923,13 @@ static UIListContentConfiguration *CYRepositoryRow(NSString *title, NSString *su
 }
 
 - (void) reloadAccounts {
-    if (loading_)
+    if (loading_) {
+        reloadPending_ = YES;
         return;
+    }
+    reloadPending_ = NO;
     loading_ = YES;
+    accountLoadGeneration_ = CYRepositoryCredentialsGeneration();
     [[self refreshControl] beginRefreshing];
     [[self tableView] reloadData];
     [self performSelectorInBackground:@selector(loadAccountsInBackground) withObject:nil];
@@ -909,7 +965,8 @@ static UIListContentConfiguration *CYRepositoryRow(NSString *title, NSString *su
                     if ([description isKindOfClass:[NSString class]] && [description length] != 0)
                         [record setObject:description forKey:@"description"];
 
-                    NSString *token(CYRepositoryToken(provider));
+                    NSUInteger credentialGeneration;
+                    NSString *token(CYRepositoryToken(provider, &credentialGeneration));
                     BOOL signedIn(token != nil);
                     [record setObject:[NSNumber numberWithBool:signedIn] forKey:@"signedIn"];
                     if (signedIn) {
@@ -921,7 +978,7 @@ static UIListContentConfiguration *CYRepositoryRow(NSString *title, NSString *su
                             [record setObject:CYPurchasedItems(userInfo) forKey:@"items"];
                         } else if (error != nil) {
                             if (CYAccountErrorRequestsInvalidation(error)) {
-                                CYDeleteRepositoryToken(provider);
+                                CYDeleteRepositoryTokenIfUnchanged(provider, token, credentialGeneration);
                                 [record setObject:[NSNumber numberWithBool:NO] forKey:@"signedIn"];
                             }
                             [record setObject:[error localizedDescription] forKey:@"error"];
@@ -945,9 +1002,15 @@ static UIListContentConfiguration *CYRepositoryRow(NSString *title, NSString *su
 }
 
 - (void) finishLoadingAccounts:(NSArray *)providers {
+    loading_ = NO;
+    // A sign-in/sign-out or a queued refresh supersedes this snapshot. Keep
+    // the refresh indicator running until the current account state arrives.
+    if (reloadPending_ || accountLoadGeneration_ != CYRepositoryCredentialsGeneration()) {
+        [self reloadAccounts];
+        return;
+    }
     [providers_ release];
     providers_ = [providers copy];
-    loading_ = NO;
     [[self refreshControl] endRefreshing];
     [[self tableView] reloadData];
 }
@@ -986,7 +1049,7 @@ static UIListContentConfiguration *CYRepositoryRow(NSString *title, NSString *su
     if ([providers_ count] == 0) {
         [cell setContentConfiguration:CYRepositoryRow(loading_ ? CYLocalize(@"Checking your sources…") : CYLocalize(@"No accounts available"),
             loading_ ? CYLocalize(@"Finding repositories that support sign-in.") : CYLocalize(@"Add a supported repository in Sources."),
-            [UIImage cy_symbolNamed:@"person.crop.circle"], [UIColor systemBlueColor])];
+            [UIImage cy_symbolNamed:@"person.crop.circle"], CYModernAccentColor())];
         if (loading_) {
             UIActivityIndicatorView *activity([[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium] autorelease]);
             [activity startAnimating]; [cell setAccessoryView:activity];
@@ -996,7 +1059,7 @@ static UIListContentConfiguration *CYRepositoryRow(NSString *title, NSString *su
     }
     NSDictionary *provider([providers_ objectAtIndex:[indexPath section]]);
     NSString *title(nil), *detail(nil), *symbol(nil);
-    UIColor *color([UIColor systemBlueColor]);
+    UIColor *color(CYModernAccentColor());
     if ([indexPath row] == 0) {
         BOOL signedIn([[provider objectForKey:@"signedIn"] boolValue]);
         NSDictionary *user([provider objectForKey:@"user"]);
@@ -1004,7 +1067,7 @@ static UIListContentConfiguration *CYRepositoryRow(NSString *title, NSString *su
         title = signedIn ? (([name isKindOfClass:[NSString class]] && [name length] != 0) ? name : CYLocalize(@"Signed in")) : CYLocalize(@"Sign In");
         detail = signedIn ? (([email isKindOfClass:[NSString class]] && [email length] != 0) ? email : CYLocalize(@"Account connected")) : CYLocalize(@"Connect your repository account");
         symbol = signedIn ? @"person.crop.circle.badge.checkmark" : @"person.crop.circle.badge.plus";
-        color = signedIn ? [UIColor systemGreenColor] : [UIColor systemBlueColor];
+        color = signedIn ? [UIColor systemGreenColor] : CYModernAccentColor();
     } else {
         NSUInteger count([[provider objectForKey:@"items"] count]);
         title = CYLocalize(@"Purchased Packages"); symbol = @"bag";

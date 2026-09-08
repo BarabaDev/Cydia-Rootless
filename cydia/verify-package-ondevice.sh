@@ -113,6 +113,8 @@ localizations=(
 for locale in "${localizations[@]}"; do
     grep -Fq "./var/jb/Applications/Cydia.app/$locale.lproj/Localizable.strings" <<<"$contents" || \
         fail "missing bundled localization: $locale"
+    grep -Fq "./var/jb/Applications/Cydia.app/$locale.lproj/InfoPlist.strings" <<<"$contents" || \
+        fail "missing localized Face ID description: $locale"
 done
 for locale in ar de el es fr he it ja ko nl pl pt-PT pt ru sv th tr vi zh-Hans zh-Hant; do
     grep -Fq "./var/jb/Applications/Cydia.app/$locale.lproj/Sections.strings" <<<"$contents" || \
@@ -127,9 +129,9 @@ if grep -Eq '\./var/jb/Applications/Cydia\.app/en\.lproj/Sections_?\.strings' <<
 fi
 packaged_translation_table_count="$(grep -Eo '\./var/jb/Applications/Cydia\.app/[^/[:space:]]+\.lproj/[^/[:space:]]+\.strings' \
     <<<"$contents" | LC_ALL=C sort -u | wc -l | tr -d ' ')"
-[[ "$packaged_translation_table_count" == 41 ]] || \
+[[ "$packaged_translation_table_count" == 62 ]] || \
     fail "unexpected packaged translation table count: $packaged_translation_table_count"
-echo "[ok] all 21 retained localizations and exactly 41 active translation tables are bundled"
+echo "[ok] all 21 retained localizations and exactly 62 active translation tables are bundled"
 
 retired_app_artwork=(
     iconClassic.png unknown.png chevron@2x.png compose.png configure.png
@@ -223,17 +225,17 @@ else
     dpkg-deb -x Cydia.deb "$tmppayload"
 fi
 [[ -f "$packaged_plist" ]] || fail "packaged Cydia.app Info.plist is missing"
-grep -A1 '<key>CFBundleShortVersionString</key>' "$packaged_plist" | grep -Fq '<string>1.1.22</string>' || \
-    fail "packaged Cydia.app public version is not 1.1.22"
-grep -A1 '<key>CFBundleVersion</key>' "$packaged_plist" | grep -Fq '<string>1.1.22</string>' || \
-    fail "packaged Cydia.app does not select final bundle version 1.1.22"
+grep -A1 '<key>CFBundleShortVersionString</key>' "$packaged_plist" | grep -Fq '<string>1.1.23</string>' || \
+    fail "packaged Cydia.app public version is not 1.1.23"
+grep -A1 '<key>CFBundleVersion</key>' "$packaged_plist" | grep -Fq '<string>1.1.23</string>' || \
+    fail "packaged Cydia.app does not select final bundle version 1.1.23"
 ! grep -Fq '<key>UIUserInterfaceStyle</key>' "$packaged_plist" || \
     fail "packaged Cydia.app still forces a fixed interface style"
 grep -A1 '<key>UILaunchStoryboardName</key>' "$packaged_plist" | grep -Fq '<string>LaunchScreen</string>' || \
     fail "packaged Cydia.app does not select the adaptive native launch screen"
 ! grep -Fq '<key>UILaunchImages</key>' "$packaged_plist" || \
     fail "packaged Cydia.app still selects legacy fixed-size launch images"
-echo "[ok] packaged Cydia.app is public version 1.1.22, final bundle version 1.1.22, with automatic Light/Dark appearance"
+echo "[ok] packaged Cydia.app is public version 1.1.23, final bundle version 1.1.23, with automatic Light/Dark appearance"
 
 if ! grep -Eq '^-rwsr-sr-x .* \./var/jb/usr/libexec/cydia/cydo$' <<<"$contents"; then
     echo "$contents" | grep '/var/jb/usr/libexec/cydia/cydo$' || true

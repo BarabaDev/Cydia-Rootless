@@ -1,0 +1,2 @@
+/* Purpose shown by iOS before Face ID confirms a repository purchase. */
+"NSFaceIDUsageDescription" = "Utilize o Face ID para confirmar compras nos repositórios.";

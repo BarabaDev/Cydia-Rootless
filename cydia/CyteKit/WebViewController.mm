@@ -157,7 +157,8 @@ static void CYRetireLegacyWebView(CyteWebView *view) {
 }
 
 - (id) initWithDelegate:(id)delegate {
-    delegate_ = delegate;
+    if ((self = [super init]) != nil)
+        delegate_ = delegate;
     return self;
 }
 
@@ -384,7 +385,7 @@ static void CYRetireLegacyWebView(CyteWebView *view) {
     if (request_ == nil)
         return;
 
-    NSMutableURLRequest *request([request_ mutableCopy]);
+    NSMutableURLRequest *request([[request_ mutableCopy] autorelease]);
     [request setCachePolicy:(cache ? NSURLRequestUseProtocolCachePolicy : NSURLRequestReloadIgnoringLocalCacheData)];
 
     request_ = request;
@@ -621,12 +622,8 @@ static void CYRetireLegacyWebView(CyteWebView *view) {
 
         [navigation setDelegate:self.delegate];
 
-        [[page navigationItem] setLeftBarButtonItem:[[[UIBarButtonItem alloc]
-            initWithTitle:UCLocalize("CLOSE")
-            style:UIBarButtonItemStylePlain
-            target:page
-            action:@selector(close)
-        ] autorelease]];
+        [[page navigationItem] setLeftBarButtonItem:CYModernBarButtonItem(@"xmark", UCLocalize("CLOSE"),
+            UIBarButtonItemStylePlain, page, @selector(close))];
 
         [[self navigationController] presentModalViewController:navigation animated:YES];
     }
@@ -844,6 +841,7 @@ static void CYRetireLegacyWebView(CyteWebView *view) {
         function_ = nil;
 
         [registered_ removeAllObjects];
+        [timer_ invalidate];
         timer_ = nil;
 
         allowsNavigationAction_ = true;
@@ -1028,12 +1026,8 @@ static void CYRetireLegacyWebView(CyteWebView *view) {
 
     if (UINavigationController *navigation = [self navigationController])
         if ([[navigation parentOrPresentingViewController] modalViewController] == navigation)
-            return [[[UIBarButtonItem alloc]
-                initWithTitle:UCLocalize("CLOSE")
-                style:UIBarButtonItemStylePlain
-                target:self
-                action:@selector(close)
-            ] autorelease];
+            return CYModernBarButtonItem(@"xmark", UCLocalize("CLOSE"),
+                UIBarButtonItemStylePlain, self, @selector(close));
 
     return nil;
 }
@@ -1112,19 +1106,15 @@ static void CYRetireLegacyWebView(CyteWebView *view) {
         registered_ = [NSMutableSet setWithCapacity:5];
         indirect_ = [[[IndirectDelegate alloc] initWithDelegate:self] autorelease];
 
-        reloaditem_ = [[[UIBarButtonItem alloc]
-            initWithTitle:UCLocalize("RELOAD")
-            style:[self rightButtonStyle]
-            target:self
-            action:@selector(reloadButtonClicked)
-        ] autorelease];
+        reloaditem_ = CYModernBarButtonItem(@"arrow.clockwise", UCLocalize("RELOAD"),
+            [self rightButtonStyle], self, @selector(reloadButtonClicked));
 
         UIControl *loadingview([[[UIControl alloc] initWithFrame:CGRectMake(0.0f, 0.0f, 32.0f, 32.0f)] autorelease]);
         [loadingview addTarget:self action:@selector(customButtonClicked) forControlEvents:UIControlEventTouchUpInside];
         [loadingview setAccessibilityLabel:UCLocalize("LOADING")];
 
         indicator_ = [[[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium] autorelease];
-        [indicator_ setColor:[UIColor systemBlueColor]];
+        [indicator_ setColor:CYModernAccentColor()];
         [indicator_ setCenter:CGPointMake(CGRectGetMidX([loadingview bounds]), CGRectGetMidY([loadingview bounds]))];
         [indicator_ setAutoresizingMask:UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin |
             UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin];
@@ -1247,6 +1237,9 @@ static _H<NSString> UserAgent_;
 }
 
 - (void) releaseSubviews {
+    [timer_ invalidate];
+    timer_ = nil;
+    [registered_ removeAllObjects];
     CYRetireLegacyWebView(webview_);
     webview_ = nil;
     scroller_ = nil;
@@ -1460,7 +1453,9 @@ static _H<NSString> UserAgent_;
     [registered_ addObject:frame];
 
     if (timer_ == nil)
-        timer_ = [NSTimer scheduledTimerWithTimeInterval:0.2 target:self selector:@selector(updateHeights:) userInfo:nil repeats:YES];
+        // The existing proxy does not retain the controller, allowing dealloc
+        // to invalidate the timer when this page is removed from navigation.
+        timer_ = [NSTimer scheduledTimerWithTimeInterval:0.2 target:(id)indirect_ selector:@selector(updateHeights:) userInfo:nil repeats:YES];
 }
 
 @end

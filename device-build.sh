@@ -5,7 +5,7 @@ usage() {
     printf '%s\n' \
         'Usage: bash device-build.sh [--clean] [--sdk PATH] [--jobs N] [--output PATH]' \
         '' \
-        'Builds and verifies clean Cydia 1.1.22 on a rootless iOS 15+ device.' \
+        'Builds and verifies clean Cydia 1.1.23 on a rootless iOS 15+ device.' \
         'Nothing is installed automatically.'
 }
 
@@ -43,12 +43,12 @@ else
     export SDKROOT="$(./ondevice-sdk.sh)"
 fi
 
-log="${TMPDIR:-/tmp}/Cydia_1.1.22_device-build.log"
+log="${TMPDIR:-/tmp}/Cydia_1.1.23_device-build.log"
 : > "$log"
 
 set +e
 {
-    printf 'Cydia 1.1.22 Rootless clean device build\n'
+    printf 'Cydia 1.1.23 Rootless clean device build\n'
     printf 'source: %s\n' "$root"
     printf 'SDKROOT: %s\n' "$SDKROOT"
     printf 'jobs: %s\n\n' "$jobs"

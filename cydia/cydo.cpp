@@ -24,6 +24,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <sys/wait.h>
+#include <spawn.h>
 #include <fcntl.h>
 
 #include <dlfcn.h>
@@ -198,17 +200,24 @@ static bool CallerIsCydia() {
         if (proc_pidinfo_ptr == NULL)
             break;
 
-        struct BSDInfoPrefix {
-            uint32_t flags;
-            uint32_t status;
-            uint32_t xstatus;
-            uint32_t current_pid;
-            uint32_t parent_pid;
+        // PROC_PIDTBSDINFO requires the complete 136-byte proc_bsdinfo ABI.
+        // Public iPhoneOS SDKs omit proc_info.h; a five-field prefix is rejected
+        // by XNU with ENOMEM rather than returning a partial parent PID.
+        struct BSDInfo {
+            uint32_t flags, status, xstatus, current_pid, parent_pid;
+            uint32_t uid, gid, real_uid, real_gid, saved_uid, saved_gid, reserved;
+            char command[16];
+            char name[32];
+            uint32_t file_count, process_group, job_count, terminal, terminal_group;
+            int32_t nice;
+            uint64_t start_seconds, start_microseconds;
         } info;
+        static_assert(sizeof(BSDInfo) == 136, "Unexpected proc_bsdinfo ABI");
         memset(&info, 0, sizeof(info));
 
         int got = proc_pidinfo_ptr(pid, 3 /* PROC_PIDTBSDINFO */, 0, &info, sizeof(info));
-        if (got < static_cast<int>(sizeof(info)) || info.parent_pid == 0 || info.parent_pid == static_cast<uint32_t>(pid))
+        if (got != static_cast<int>(sizeof(info)) || info.current_pid != static_cast<uint32_t>(pid) ||
+            info.parent_pid == 0 || info.parent_pid == static_cast<uint32_t>(pid))
             break;
         pid = static_cast<pid_t>(info.parent_pid);
     }
@@ -237,8 +246,10 @@ static bool BecomeRoot() {
 
     /* A correctly installed cydo is root:wheel mode 6755. Try normal setuid
        semantics first; many rootless bootstraps handle this directly. */
-    setgid(0);
-    setuid(0);
+    if (setgid(0) != 0)
+        RootlessDiag("CYDO", "level=WARN root attempt setgid failed errno=%d error=%s", errno, strerror(errno));
+    if (setuid(0) != 0)
+        RootlessDiag("CYDO", "level=WARN root attempt setuid failed errno=%d error=%s", errno, strerror(errno));
     if (geteuid() == 0)
         return true;
 
@@ -265,8 +276,10 @@ static bool BecomeRoot() {
         if (fix_setuid != NULL)
             fix_setuid(getpid());
 
-        setgid(0);
-        setuid(0);
+        if (setgid(0) != 0)
+            RootlessDiag("CYDO", "level=WARN root attempt setgid failed errno=%d error=%s", errno, strerror(errno));
+        if (setuid(0) != 0)
+            RootlessDiag("CYDO", "level=WARN root attempt setuid failed errno=%d error=%s", errno, strerror(errno));
 
         bool root = geteuid() == 0;
         dlclose(handle);
@@ -490,6 +503,65 @@ static int AcquireDpkgLock(const char *path, unsigned timeoutSeconds) {
     }
 }
 
+// Firmware metadata rewrites the complete dpkg status file. Keep both locks
+// in this parent for the full worker lifetime; locks are not inherited by a
+// child. A maintainer script already inside dpkg must defer this maintenance,
+// rather than bypass its parent's lock or wait on it indefinitely.
+static int RefreshFirmwareMetadata() {
+    const char *pendingPath = "/var/jb/var/lib/cydia/firmware.pending";
+    // Preserve a retry request even when firmware.ver is already current.
+    // The launch daemon also retries unconditionally on its next startup.
+    auto markPending = [pendingPath]() {
+        int pending = open(pendingPath, O_WRONLY | O_CREAT | O_NOFOLLOW, 0644);
+        if (pending >= 0)
+            close(pending);
+        else
+            RootlessDiag("FIRMWARE", "level=ERROR could not persist retry errno=%d error=%s", errno, strerror(errno));
+    };
+    markPending();
+    int frontend = AcquireDpkgLock("/var/jb/var/lib/dpkg/lock-frontend", 0);
+    if (frontend < 0) {
+        if (errno == EAGAIN) {
+            RootlessDiag("FIRMWARE", "status=deferred reason=package-manager-active");
+            return EX_OK;
+        }
+        return EX_TEMPFAIL;
+    }
+    // A previous successful worker may have cleared our initial request
+    // while we acquired the locks; record this worker's attempt under lock.
+    markPending();
+    int database = AcquireDpkgLock("/var/jb/var/lib/dpkg/lock", 0);
+    if (database < 0) {
+        const int saved = errno;
+        close(frontend);
+        if (saved == EAGAIN) {
+            RootlessDiag("FIRMWARE", "status=deferred reason=package-database-active");
+            return EX_OK;
+        }
+        return EX_TEMPFAIL;
+    }
+    const char *script = "/var/jb/usr/libexec/cydia/firmware.sh";
+    char *const arguments[] = {
+        const_cast<char *>(script), const_cast<char *>("--under-dpkg-lock"), NULL
+    };
+    extern char **environ;
+    pid_t child = -1;
+    int result = posix_spawn(&child, script, NULL, NULL, arguments, environ);
+    int status = 0;
+    pid_t waited = -1;
+    if (result == 0)
+        do { waited = waitpid(child, &status, 0); } while (waited == -1 && errno == EINTR);
+    if (result == 0 && waited == child && WIFEXITED(status) && WEXITSTATUS(status) == EX_OK)
+        unlink(pendingPath);
+    close(database);
+    close(frontend);
+    if (result != 0 || waited != child || !WIFEXITED(status)) {
+        RootlessDiag("FIRMWARE", "level=ERROR worker failed spawn=%d waited=%d status=%d", result, waited, status);
+        return EX_SOFTWARE;
+    }
+    return WEXITSTATUS(status);
+}
+
 int main(int argc, char *argv[]) {
     RootlessDiag("CYDO", "start argc=%d uid=%d euid=%d", argc, getuid(), geteuid());
     if (argc <= 0 || argv == NULL || argv[0] == NULL)
@@ -515,6 +587,10 @@ int main(int argc, char *argv[]) {
     }
 
     SanitizeEnvironment();
+
+    if (argc == 2 && (strcmp(argv[1], "--refresh-firmware") == 0 ||
+        strcmp(argv[1], "/var/jb/usr/libexec/cydia/firmware.sh") == 0))
+        return RefreshFirmwareMetadata();
 
     // Narrowly-scoped privileged source persistence.  This is not
     // a general file-write primitive: only Cydia's fixed cache file may be

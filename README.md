@@ -1,6 +1,6 @@
-# Cydia 1.1.22 Rootless
+# Cydia 1.1.23 Rootless
 
-Cydia for rootless iOS 15 and later, based on the Cydia source supplied with this project. This unofficial edition was modified by BarabaDev on **7 September 2026**. It includes native package screens, repository accounts, adaptive layouts, dark appearance and 21 bundled localizations. It is not an official release or an endorsement by Jay Freeman (saurik), SaurikIT, LLC, or Sam Bingner.
+Cydia for rootless iOS 15 and later, based on the Cydia source supplied with this project. This unofficial edition was modified by BarabaDev on **8 September 2026**. It includes native package screens, repository accounts, adaptive layouts, dark appearance and 21 bundled localizations. It is not an official release or an endorsement by Jay Freeman (saurik), SaurikIT, LLC, or Sam Bingner.
 
 ## Build on macOS
 
@@ -15,7 +15,7 @@ JOBS=4 ./mac-build.sh
 The build audits the sources, compiles and signs the arm64 binaries, then creates and verifies:
 
 ```text
-cydia/debs/cydia_1.1.22_iphoneos-arm64.deb
+cydia/debs/cydia_1.1.23_iphoneos-arm64.deb
 ```
 
 Temporary objects and staging directories are removed after the build. Build logs are written to the system temporary directory. Nothing is installed or published automatically. Generated DEBs are ignored by Git; distribute them separately as release assets.
@@ -40,9 +40,15 @@ This runs source and resource audits, strict compilation and Clang static analys
 
 Actual APT/dpkg operations and restart behavior require validation on a rootless device; the build does not execute them.
 
+The deployment target is iOS 15.0 on arm64 with a compatible rootless bootstrap. Building against a newer SDK does not establish support for every OS version or jailbreak. Simulator interface checks are separate from device validation of installation, purchases and restart behavior.
+
+Use one package manager at a time for installation and removal. The helper locks individual dpkg invocations, but the app does not hold the frontend lock continuously across an entire multi-step transaction.
+
+Repository compatibility currently permits unsigned, weakly signed and expired metadata. Package hash and size checks verify consistency with the repository metadata; they do not authenticate the publisher when that metadata is unauthenticated. Add only sources you trust.
+
 ## Repository publishing
 
-Keep the metadata in `cydia/cydia.control` when generating the repository index. Upload the [repository icon](RepositoryAssets/README.md) so it is visible before installation. The version is exactly **1.1.22**; testing over an already installed 1.1.22 requires reinstalling it.
+Keep the metadata in `cydia/cydia.control` when generating the repository index. Upload the [repository icon](RepositoryAssets/README.md) so it is visible before installation. The version is **1.1.23**, so an installed 1.1.22 is eligible for a normal package update after the repository index is refreshed.
 
 Publish the complete corresponding source for this exact build alongside the DEB, including resources, pinned APT sources, build scripts and licenses. Keep an immutable release tag or source archive and provide a clear source download link wherever the DEB is offered. A link to upstream Cydia or a changing development branch does not identify this build's corresponding source. Keep the source available for as long as the binary is offered. The app's source link is `https://github.com/BarabaDev/Cydia-Rootless`; upload the matching source there before distributing the DEB.
 
@@ -50,7 +56,7 @@ The copyright licenses do not establish permission to use trademarks or imply au
 
 ## Languages
 
-All 21 existing Cydia localizations are included in the main package. New native interface strings use the bundled tables, with English fallback where translations are incomplete. The existing language set does not include Croatian.
+All 21 existing Cydia localizations are included in the main package. Each language has the complete 524-entry interface catalog, including 301 native-interface strings and a localized Face ID purpose. All 20 non-English languages also include the 51 category names; English uses the original category names. Counts and percentages follow the selected locale. English remains the fallback for unsupported languages and unknown strings. Package names, repository descriptions and original license texts retain their supplied content. The existing language set does not include Croatian.
 
 ## Source layout
 

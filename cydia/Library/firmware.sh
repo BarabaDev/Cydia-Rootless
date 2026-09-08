@@ -2,6 +2,13 @@
 
 set -e
 
+# Direct startup/maintenance callers enter the helper that holds Debian's
+# frontend and database locks until this worker finishes. The internal worker
+# argument grants no privileges; the script itself is never setuid.
+if [[ $# != 1 || $1 != --under-dpkg-lock ]]; then
+    exec /var/jb/usr/libexec/cydia/cydo --refresh-firmware
+fi
+
 shopt -s extglob
 shopt -s nullglob
 
@@ -21,6 +28,25 @@ fi
 model=$(sysctl -n "${model}")
 
 status=${data}/status
+
+# Capability services can be unavailable during startup. Bound their retries
+# before creating any replacement metadata or package list files.
+if [[ ${cpu} == arm || ${cpu} == arm64 ]]; then
+    capabilities_ready=
+    for attempt in {1..10}; do
+        if gssc=$(gssc 2>&1) && [[ ${gssc} != *'(null)'* && -n ${gssc} ]]; then
+            capabilities_ready=1
+            break
+        fi
+        if [[ ${attempt} != 10 ]]; then
+            sleep 1
+        fi
+    done
+    if [[ -z ${capabilities_ready} ]]; then
+        printf '%s\n' 'Cydia: device capabilities are unavailable; existing firmware metadata was preserved.' >&2
+        exit 1
+    fi
+fi
 
 function lower() {
     sed -e 'y/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/'
@@ -95,14 +121,6 @@ rm -f "${data}"/status-tmp.!("${xxxxxx}")
 
     if [[ ${cpu} == arm || ${cpu} == arm64 ]]; then
         pseudo "firmware" "${version}" "almost impressive Apple frameworks" "iOS Firmware"
-
-        while [[ 1 ]]; do
-            gssc=$(gssc 2>&1)
-            if [[ ${gssc} != *'(null)'* ]]; then
-                break
-            fi
-            sleep 1
-        done
 
         echo "${gssc}" | sed -re '
             /^    [^ ]* = [0-9.]*;$/ ! d;

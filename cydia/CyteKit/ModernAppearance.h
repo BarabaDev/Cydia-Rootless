@@ -1,4 +1,4 @@
-/* Cydia 1.1.22 Rootless - iOS 15+ appearance helpers */
+/* Cydia 1.1.23 Rootless - iOS 15+ appearance helpers */
 
 #ifndef CyteKit_ModernAppearance_H
 #define CyteKit_ModernAppearance_H
@@ -48,11 +48,17 @@ void CYModernizeTableView(UITableView *table);
 
 UITableViewStyle CYModernGroupedTableStyle(void);
 UIImage *CYModernTabImage(NSString *identifier, BOOL selected);
+UIBarButtonItem *CYModernBarButtonItem(NSString *symbol, NSString *label,
+    UIBarButtonItemStyle style, id target, SEL action);
 
+// Upstream Cydia uses UIKit blue; system colors adapt to appearance and contrast.
+UIColor *CYModernAccentColor(void);
+UIColor *CYModernPrimaryButtonColor(void);
 UIColor *CYModernCellBackgroundColor(void);
 UIColor *CYModernLabelColor(void);
 UIColor *CYModernSecondaryLabelColor(void);
 UIColor *CYModernCommercialColor(void);
+UIColor *CYModernPackageDescriptionColor(BOOL commercial);
 UIColor *CYModernQueuedColor(BOOL removing);
 
 #endif//CyteKit_ModernAppearance_H

@@ -1,0 +1,2 @@
+/* Purpose shown by iOS before Face ID confirms a repository purchase. */
+"NSFaceIDUsageDescription" = "使用 Face ID 確認套件來源的購買交易。";

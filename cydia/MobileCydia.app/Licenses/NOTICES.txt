@@ -1,6 +1,6 @@
-Cydia 1.1.22 Rootless — component licenses and notices
+Cydia 1.1.23 Rootless — component licenses and notices
 
-This is an unofficial edition modified by BarabaDev on 7 September 2026.
+This is an unofficial edition modified by BarabaDev on 8 September 2026.
 Original Cydia: Jay Freeman (saurik), SaurikIT, LLC.
 Modified Cydia base: Sam Bingner.
 No endorsement by the original authors is claimed.

@@ -6,7 +6,7 @@ source_root="$project_root/cydia"
 sdk_path="$(xcrun --sdk iphoneos --show-sdk-path)"
 target="arm64-apple-ios15.0"
 
-printf '%s\n' '== Cydia 1.1.22 Mac quality audit =='
+printf '%s\n' '== Cydia 1.1.23 Mac quality audit =='
 
 (
     cd "$source_root"
@@ -112,8 +112,8 @@ fi
 
 cd "$source_root"
 for source_file in \
-    Cydia/ModernNativeViews.mm Cydia/InstalledFileTree.mm Cydia/InstalledFilesView.mm Cydia/PackageActionsController.mm Cydia/RepositoryAccounts.mm CyteKit/ModernAppearance.mm CyteKit/WebView.mm CyteKit/CyteObject.mm \
-    CyteKit/ListController.mm Sources.mm postinst.mm DiskUsage.cpp setnsfpn.cpp; do
+    Cydia/ModernNativeViews.mm Cydia/InstalledFileTree.mm Cydia/InstalledFilesView.mm Cydia/PackageActionsController.mm Cydia/RepositoryAccounts.mm CyteKit/ModernAppearance.mm CyteKit/WebView.mm CyteKit/WebViewController.mm CyteKit/CyteObject.mm \
+    CyteKit/ListController.mm Sources.mm cydo.cpp postinst.mm DiskUsage.cpp setnsfpn.cpp; do
     analyzer_output="$(xcrun --sdk iphoneos clang++ --analyze -std=c++11 \
         -fobjc-call-cxx-cdtors -fvisibility-inlines-hidden \
         -target "$target" -isysroot "$sdk_path" -include system.h \

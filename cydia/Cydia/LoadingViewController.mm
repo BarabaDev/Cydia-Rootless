@@ -23,6 +23,8 @@
 
 #include "Cydia/LoadingViewController.h"
 #include "Cydia/ModernNativeViews.h"
+#include "Cydia/ModernLocalization.h"
+#include "CyteKit/Localize.h"
 #include "CyteKit/ModernAppearance.h"
 
 @implementation CydiaLoadingViewController
@@ -51,7 +53,7 @@
             availableCount:[available unsignedIntegerValue]];
     [self setView:home];
 
-    [[self navigationItem] setTitle:@"Home"];
+    [[self navigationItem] setTitle:UCLocalize("HOME")];
     [[self navigationItem] setLargeTitleDisplayMode:UINavigationItemLargeTitleDisplayModeNever];
     [[self navigationItem] setLeftBarButtonItem:[[[UIBarButtonItem alloc]
         initWithImage:[UIImage cy_symbolNamed:@"info.circle"]
@@ -61,10 +63,10 @@
     // full-screen control never appears late when the live controller swaps
     // in.  The launch window is intentionally non-interactive until that swap.
     CydiaNavigationButton *reload([[[CydiaNavigationButton alloc] initWithSymbol:@"arrow.clockwise"
-        label:@"Reload Home" target:nil action:NULL] autorelease]);
+        label:CYLocalize(@"Reload Home") target:nil action:NULL] autorelease]);
     UIBarButtonItem *reloadItem([[[UIBarButtonItem alloc] initWithCustomView:reload] autorelease]);
     CydiaNavigationButton *fullScreen([[[CydiaNavigationButton alloc]
-        initWithSymbol:@"arrow.up.left.and.arrow.down.right" label:@"Full Screen" target:nil action:NULL] autorelease]);
+        initWithSymbol:@"arrow.up.left.and.arrow.down.right" label:CYLocalize(@"Full Screen") target:nil action:NULL] autorelease]);
     UIBarButtonItem *fullScreenItem([[[UIBarButtonItem alloc] initWithCustomView:fullScreen] autorelease]);
     [[self navigationItem] setRightBarButtonItems:
         [NSArray arrayWithObjects:reloadItem, fullScreenItem, nil]];
