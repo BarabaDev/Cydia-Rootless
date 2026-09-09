@@ -1,4 +1,4 @@
-/* Cydia 1.1.27 Rootless - repository accounts compatible with Sileo's API. */
+/* Cydia 1.1.28 Rootless - repository accounts compatible with Sileo's API. */
 
 #include "Cydia/ModernLocalization.h"
 #include "Cydia/RepositoryAccounts.h"
@@ -100,7 +100,7 @@ static NSData *CYRepositoryRequest(NSURL *url, NSString *method, NSDictionary *b
 
     NSMutableURLRequest *request([NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:20.0]);
     [request setHTTPMethod:method ?: @"GET"];
-    [request setValue:@"Cydia/1.1.27" forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"Cydia/1.1.28" forHTTPHeaderField:@"User-Agent"];
     [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
     if (body != nil) {
         NSError *jsonError(nil);
@@ -156,10 +156,31 @@ static NSData *CYRepositoryRequest(NSURL *url, NSString *method, NSDictionary *b
     }
     NSInteger status([(NSHTTPURLResponse *)response statusCode]);
     if (status < 200 || status >= 300) {
-        if (error != NULL)
-            *error = [NSError errorWithDomain:CYRepositoryAccountErrorDomain code:CYRepositoryAccountErrorResponse userInfo:@{
-                NSLocalizedDescriptionKey:[NSString stringWithFormat:CYLocalize(@"The repository account returned HTTP %ld."), (long) status],
-                CYRepositoryAccountHTTPStatusKey:@(status)}];
+        if (error != NULL) {
+            NSString *message([NSString stringWithFormat:CYLocalize(@"The repository account returned HTTP %ld."), (long) status]);
+            BOOL invalidate(NO);
+            NSString *recoveryURL(nil);
+            // Providers can report an expired token in a non-2xx JSON body.
+            // Preserve only explicit error metadata within the existing size
+            // bound; every non-2xx response still fails, regardless of its body.
+            if ([data length] <= 2 * 1024 * 1024) {
+                id object([NSJSONSerialization JSONObjectWithData:data options:0 error:NULL]);
+                if ([object isKindOfClass:[NSDictionary class]]) {
+                    id providerError([object objectForKey:@"error"]);
+                    if ([providerError isKindOfClass:[NSString class]] && [providerError length] != 0)
+                        message = providerError;
+                    id invalidateValue([object objectForKey:@"invalidate"]);
+                    invalidate = [invalidateValue respondsToSelector:@selector(boolValue)] && [invalidateValue boolValue];
+                    id recovery([object objectForKey:@"recovery_url"]);
+                    if ([recovery isKindOfClass:[NSString class]])
+                        recoveryURL = recovery;
+                }
+            }
+            NSError *providerError(CYAccountErrorWithFlags(CYRepositoryAccountErrorResponse, message, invalidate, recoveryURL));
+            NSMutableDictionary *info([NSMutableDictionary dictionaryWithDictionary:[providerError userInfo]]);
+            [info setObject:@(status) forKey:CYRepositoryAccountHTTPStatusKey];
+            *error = [NSError errorWithDomain:CYRepositoryAccountErrorDomain code:CYRepositoryAccountErrorResponse userInfo:info];
+        }
         return nil;
     }
     if ([data length] > 2 * 1024 * 1024) {

@@ -1,4 +1,4 @@
-/* Cydia 1.1.27 Rootless - complete native iOS 15+ transaction UI */
+/* Cydia 1.1.28 Rootless - complete native iOS 15+ transaction UI */
 
 #include "Cydia/ModernLocalization.h"
 #include "Cydia/ModernNativeViews.h"
@@ -1636,7 +1636,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
         [featuredScroll_ addSubview:featuredStack_];
 
         UILabel *footer(CYM3Label(UIFontTextStyleFootnote, [UIColor secondaryLabelColor], 1));
-        [footer setText:@"Cydia 1.1.27"];
+        [footer setText:@"Cydia 1.1.28"];
         homeVersion_ = footer;
         [footer setTextAlignment:NSTextAlignmentCenter];
 

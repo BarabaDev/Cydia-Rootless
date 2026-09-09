@@ -3519,8 +3519,10 @@ pkgAcqArchive::pkgAcqArchive(pkgAcquire *const Owner, pkgSourceList *const Sourc
    auto FinalFile = _config->FindDir("Dir::Cache::Archives") + flNotDir(StoreFilename);
    if (stat(FinalFile.c_str(), &Buf) == 0)
    {
-      // Make sure the size matches
-      if ((unsigned long long)Buf.st_size == Version->Size)
+      // Reuse only a matching cached archive when usable hashes are known.
+      // Keep the existing local/no-usable-hash and configured algorithm policy.
+      if ((unsigned long long)Buf.st_size == Version->Size &&
+          (!ExpectedHashes.usable() || ExpectedHashes.VerifyFile(FinalFile)))
       {
 	 Complete = true;
 	 Local = true;
@@ -3529,8 +3531,7 @@ pkgAcqArchive::pkgAcqArchive(pkgAcquire *const Owner, pkgSourceList *const Sourc
 	 return;
       }
 
-      /* Hmm, we have a file and its size does not match, this shouldn't
-	 happen.. */
+      // A stale or damaged cache entry follows the existing download path.
       RemoveFile("pkgAcqArchive::QueueNext", FinalFile);
    }
 

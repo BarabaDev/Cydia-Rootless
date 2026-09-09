@@ -1,3 +1,14 @@
+# Cydia 1.1.28
+
+Repository refresh, account recovery and cached-package reliability fixes by BarabaDev on **9 September 2026**.
+
+- Fixed an invalid file-descriptor error that stopped individual source refreshes before APT could request repository indexes.
+- Both individual and full refreshes keep one lists lock until error handling and cache repair finish. Full refresh retains its normal APT hooks and cleanup; individual refresh still preserves unrelated indexes.
+- Explicit expired-session information in bounded repository HTTP error responses now reaches the existing sign-in recovery flow. Generic HTTP/network failures do not independently sign users out, and unsuccessful HTTP responses never become successful account results.
+- Cached package archives with usable expected checksums are verified before reuse. Mismatched archives follow the existing removal and download path; local-package and configured hash-algorithm compatibility is preserved.
+
+The package version is `1.1.28` and the architecture is `iphoneos-arm64`. Build, component and simulator checks do not replace repository account and package-operation validation on a rootless device.
+
 # Cydia 1.1.27
 
 Repository actions and scrolling update by BarabaDev on **9 September 2026**.

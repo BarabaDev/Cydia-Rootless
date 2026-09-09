@@ -5880,16 +5880,13 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
     }
     CYRootlessDiag(@"REFRESH", @"sourceEntries=%zu externalEntries=%zu", sourceCount, externalCount);
 
-    // A targeted fetcher keeps its lock until error processing has finished.
-    // Avoid taking a second fcntl lock on the same file in the partial path.
-    FileFd lock = FileFd(sourceKey == nil ?
-        GetLock(_config->FindDir("Dir::State::Lists") + "lock") : -1, true);
-    pkgAcquire targeted(&status);
-    if (selected != NULL && !targeted.GetLock(_config->FindDir("Dir::State::Lists"))) {
-        [self popErrorWithTitle:title];
-        return false;
-    }
-    if ([self popErrorWithTitle:title]) {
+    // One acquire object owns the lists lock through error processing and
+    // cache repair. FileFd(-1, true) is an error, not an empty lock wrapper;
+    // opening this lock twice also lets the inner close release both locks.
+    pkgAcquire fetcher(&status);
+    bool locked(fetcher.GetLock(_config->FindDir("Dir::State::Lists")));
+    bool lockError([self popErrorWithTitle:title]);
+    if (!locked || lockError) {
         CYRootlessDiag(@"REFRESH", @"end status=failed phase=lists-lock durationMs=%llu", (unsigned long long) ((_timestamp - diagnosticsStart) / 1000));
         if (sourceKey == nil)
             CYStoreRepositoryVerificationState(false, false);
@@ -5901,9 +5898,9 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
     // Keep the full list alive to preserve the parsed components, architecture
     // filters and signing options. Enqueue only this source; do not run the
     // all-source cleanup or hooks against a one-source acquisition queue.
-    bool success(selected != NULL ?
-        (selected->GetIndexes(&targeted, false) && AcquireUpdate(targeted, PulseInterval_, false, false)) :
-        ListUpdate(status, list, PulseInterval_));
+    bool fullRefresh(selected == NULL);
+    bool enqueued(fullRefresh ? list.GetIndexes(&fetcher) : selected->GetIndexes(&fetcher, false));
+    bool success(enqueued && AcquireUpdate(fetcher, PulseInterval_, fullRefresh, fullRefresh));
     bool cancelled(status.WasCancelled());
     bool fatal(false);
     bool sourceIsolated(false);

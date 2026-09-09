@@ -1,6 +1,8 @@
-# Cydia 1.1.27 Rootless
+# Cydia 1.1.28 Rootless
 
 Cydia for rootless iOS 15 and later, based on the Cydia source supplied with this project. This unofficial edition was modified by BarabaDev on **9 September 2026**. It includes native package screens, repository accounts, adaptive layouts, dark appearance and 21 bundled localizations. It is not an official release or an endorsement by Jay Freeman (saurik), SaurikIT, LLC, or Sam Bingner.
+
+Version 1.1.28 fixes individual source refreshes, keeps repository-list access protected through refresh completion, preserves explicit expired-session responses for sign-in recovery, and verifies usable expected checksums before reusing cached package archives.
 
 Sources support individual Refresh actions and removal of Cydia-managed entries. Package rows provide quick actions while retaining the normal review and account flow. Manage Account shows the repository sign-in state separately from purchase ownership.
 
@@ -17,7 +19,7 @@ JOBS=4 ./mac-build.sh
 The build audits the sources, compiles and signs the arm64 binaries, then creates and verifies:
 
 ```text
-cydia/debs/cydia_1.1.27_iphoneos-arm64.deb
+cydia/debs/cydia_1.1.28_iphoneos-arm64.deb
 ```
 
 Temporary objects and staging directories are removed after the build. Build logs are written to the system temporary directory. Nothing is installed or published automatically. Generated DEBs are ignored by Git; distribute them separately as release assets.
@@ -48,11 +50,11 @@ The app and helper do not create or automatically attach a Cydia Rootless diagno
 
 Use one package manager at a time for installation and removal. The helper locks individual dpkg invocations, but the app does not hold the frontend lock continuously across an entire multi-step transaction.
 
-Repository compatibility currently permits unsigned, weakly signed and expired metadata. Package hash and size checks verify consistency with the repository metadata; they do not authenticate the publisher when that metadata is unauthenticated. Add only sources you trust.
+Repository compatibility currently permits unsigned, weakly signed and expired metadata. Fresh downloads and cached archives with usable expected hashes are checked for consistency with the repository metadata; they do not authenticate the publisher when that metadata is unauthenticated. Add only sources you trust.
 
 ## Repository publishing
 
-Keep the metadata in `cydia/cydia.control` when generating the repository index. Upload the [repository icon](RepositoryAssets/README.md) so it is visible before installation. The version is **1.1.27**, so an installed 1.1.26 is eligible for a normal package update after the repository index is refreshed.
+Keep the metadata in `cydia/cydia.control` when generating the repository index. Upload the [repository icon](RepositoryAssets/README.md) so it is visible before installation. The version is **1.1.28**, so an installed 1.1.27 is eligible for a normal package update after the repository index is refreshed.
 
 Publish the complete corresponding source for this exact build alongside the DEB, including resources, pinned APT sources, build scripts and licenses. Keep an immutable release tag or source archive and provide a clear source download link wherever the DEB is offered. A link to upstream Cydia or a changing development branch does not identify this build's corresponding source. Keep the source available for as long as the binary is offered. The app's source link is `https://github.com/BarabaDev/Cydia-Rootless`; upload the matching source there before distributing the DEB.
 
