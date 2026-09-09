@@ -527,3 +527,6 @@
 /* Commercial package status. */
 "Modern.Paid package" = "แพ็กเกจแบบเสียเงิน";
 "Modern.Checking purchase…" = "กำลังตรวจสอบสถานะการซื้อ…";
+
+/* Updated purchase quote. */
+"Modern.The price changed. Review the updated price and confirm again." = "ราคามีการเปลี่ยนแปลง โปรดตรวจสอบราคาที่อัปเดตแล้วและยืนยันอีกครั้ง";

@@ -270,20 +270,6 @@ extern char **environ;
 
 const char *common_arch=NULL;
 
-// Public diagnostics should capture Objective-C exceptions before
-// termination. This does not replace crash reports for SIGSEGV/SIGABRT, but
-// it gives a useful last-known exception reason and bounded stack context.
-static void CYRootlessUncaughtExceptionHandler(NSException *exception) {
-    NSArray *frames([exception callStackSymbols]);
-    if ([frames count] > 12)
-        frames = [frames subarrayWithRange:NSMakeRange(0, 12)];
-    NSString *stack([frames componentsJoinedByString:@" | "]);
-    CYRootlessDiag(@"CRASH", @"level=ERROR kind=objc-exception name=%@ reason=%@ stack=%@",
-        [exception name] ?: @"<nil>",
-        CYRootlessDiagnosticsText([exception reason]),
-        CYRootlessDiagnosticsText(stack));
-}
-
 /* Profiler {{{ */
 struct timeval _ltv;
 bool _itv;
@@ -6311,12 +6297,6 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
         CYRootlessDiag(@"SUPPORT", @"attached cydia.log bytes=%lu", (unsigned long) [cydiaLog length]);
     }
 
-    NSData *diagnostics([NSData dataWithContentsOfFile:@"/var/mobile/Documents/Cydia_Rootless_Diagnostics.log"]);
-    if (diagnostics != nil && [diagnostics length] != 0) {
-        [controller addAttachmentData:diagnostics mimeType:@"text/plain" fileName:@"Cydia_Rootless_Diagnostics.log"];
-        CYRootlessDiag(@"SUPPORT", @"attached rootless diagnostics bytes=%lu", (unsigned long) [diagnostics length]);
-    }
-
     // If a prior dpkg listing exists, keep the historical attachment without
     // blocking the UI to regenerate it synchronously.
     NSData *dpkgLog([NSData dataWithContentsOfFile:@"/tmp/dpkgl.log"]);
@@ -8334,7 +8314,16 @@ enum CYCommercialPackageAccess {
     CYCommercialPackageAccess purchaseAccess_;
     _H<NSString> purchasePrice_;
     BOOL purchaseReturnToVersions_;
-    BOOL returningFromRepositoryAccount_;
+    _H<NSArray> purchaseIdentity_;
+    NSUInteger purchaseAccountRevision_;
+    NSTimeInterval purchaseCheckedAt_;
+    BOOL purchaseInfoPending_;
+    BOOL purchaseTransitioning_;
+    BOOL reloadAfterPurchaseTransition_;
+    BOOL purchaseRefreshOnActive_;
+    _H<NSString> purchaseFailure_;
+    _H<Package> pendingCommercialPackage_;
+    unsigned pendingCommercialDatabaseEra_;
     _H<NSURLSessionDataTask> detailIconTask_;
 }
 
@@ -8373,18 +8362,22 @@ enum CYCommercialPackageAccess {
 }
 
 - (void) _clickButtonWithPackage:(Package *)package {
+    if (package == nil || purchaseInProgress_) return;
     if ([package isCommercial]) {
+        [self updateCommercialPurchaseAction:NO];
+        if (purchaseInfoPending_) {
+            pendingCommercialPackage_ = package;
+            pendingCommercialDatabaseEra_ = [database_ era];
+            return;
+        }
         switch (purchaseAccess_) {
             case CYCommercialPackageAccessSignIn:
-            case CYCommercialPackageAccessUnavailable:
-                [self openRepositoryAccount]; return;
-            case CYCommercialPackageAccessBuy:
-                [self confirmPurchaseForPackage:package]; return;
-            case CYCommercialPackageAccessRetry:
-                [self refreshCommercialPurchaseAction]; return;
-            case CYCommercialPackageAccessChecking:
-                return;
-            default: break;
+            case CYCommercialPackageAccessUnavailable: [self openRepositoryAccount]; return;
+            case CYCommercialPackageAccessBuy: [self confirmPurchaseForPackage:package]; return;
+            case CYCommercialPackageAccessRetry: [self refreshCommercialPurchaseAction]; return;
+            case CYCommercialPackageAccessUnknown:
+            case CYCommercialPackageAccessChecking: return;
+            case CYCommercialPackageAccessInstall: break;
         }
     }
     [self.delegate installPackage:package];
@@ -8513,18 +8506,18 @@ enum CYCommercialPackageAccess {
     if ((self = [super init]) != nil) {
         database_ = database;
         name_ = name == nil ? @"" : [NSString stringWithString:name];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(repositoryAccountStateChanged:)
+            name:CYRepositoryAccountStateDidChangeNotification object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(repositoryAccountStateChanged:)
+            name:UIApplicationDidBecomeActiveNotification object:nil];
     } return self;
 }
 
 - (void) reloadData {
-    ++purchaseEra_;
-    purchaseAccess_ = CYCommercialPackageAccessUnknown;
-    purchasePrice_ = nil;
-    purchaseReturnToVersions_ = NO;
+    if (purchaseTransitioning_) { reloadAfterPurchaseTransition_ = YES; return; }
     [super reloadData];
-    [modernDetail_ setActionEnabled:YES];
-    [modernDetail_ setAccountNotice:nil target:nil action:NULL];
-    [modernDetail_ setCommercial:NO];
+    [detailIconTask_ cancel];
+    detailIconTask_ = nil;
 
     UINavigationController *presented = (UINavigationController *)[self presentedViewController];
     if (CYInvalidatePackageActionMenu(presented))
@@ -8571,6 +8564,18 @@ enum CYCommercialPackageAccess {
     if (package_ == nil) {
         // A stale deep link or a package removed during Refresh must end in a
         // clear recoverable state, never in the permanent skeleton/spinner.
+        ++purchaseEra_;
+        purchaseInProgress_ = false;
+        purchaseReturnToVersions_ = NO;
+        purchaseRefreshOnActive_ = NO;
+        [purchaseSession_ cancel];
+        purchaseSession_ = nil;
+        purchaseInfoPending_ = NO;
+        purchaseIdentity_ = nil;
+        pendingCommercialPackage_ = nil;
+        commercial_ = false;
+        [modernDetail_ setAccountNotice:nil target:nil action:NULL];
+        [modernDetail_ setCommercial:NO];
         [modernDetail_ setUnavailableIdentifier:name_];
         [modernDetail_ setActionTitle:nil destructive:NO target:self action:@selector(customButtonClicked)];
         [modernDetail_ setNavigationTarget:self settingsAction:@selector(openPackageSettings) filesAction:@selector(openPackageFiles) showFiles:NO];
@@ -8633,84 +8638,170 @@ enum CYCommercialPackageAccess {
         }
         [modernDetail_ setCommercial:commercial_];
         BOOL destructive(buttons_.size() == 1 && [buttons_[0].first isEqualToString:@"REMOVE"]);
-        [modernDetail_ setActionTitle:title destructive:destructive target:self action:@selector(customButtonClicked)];
+        if (!commercial_ || source == nil)
+            [modernDetail_ setActionTitle:title destructive:destructive target:self action:@selector(customButtonClicked)];
         [modernDetail_ setNavigationTarget:self settingsAction:@selector(openPackageSettings) filesAction:@selector(openPackageFiles) showFiles:[package_ installed] != nil];
         if (commercial_ && source != nil)
-            [self refreshCommercialPurchaseAction];
+            [self updateCommercialPurchaseAction:NO];
+        else {
+            ++purchaseEra_;
+            purchaseInProgress_ = false;
+            purchaseReturnToVersions_ = NO;
+            purchaseRefreshOnActive_ = NO;
+            [purchaseSession_ cancel];
+            purchaseSession_ = nil;
+            purchaseInfoPending_ = NO;
+            purchaseIdentity_ = nil;
+            pendingCommercialPackage_ = nil;
+            [modernDetail_ setAccountNotice:nil target:nil action:NULL];
+            [modernDetail_ setActionEnabled:YES];
+        }
     }
 }
 
 // Payment providers remain authoritative for access. A commercial tag alone
 // neither grants a download nor tells the user where to connect an account.
-- (void) refreshCommercialPurchaseAction {
+// Every entry point renders the same model. Account guidance stays attached;
+// asynchronous checking changes only the reserved status caption.
+- (void) renderCommercialPurchaseAction {
+    if (purchaseTransitioning_ || package_ == nil || !commercial_ || [package_ source] == nil) return;
+    BOOL primaryInstall([package_ uninstalled] && [package_ mode] == nil);
+    NSString *title(buttons_.empty() ? nil : (buttons_.size() == 1 ? (NSString *)buttons_[0].second : UCLocalize("MODIFY")));
+    SEL action(@selector(customButtonClicked));
+    NSString *detail([package_ installed] ?: CYLocalize(@"Ready to review"));
+    BOOL enabled(YES);
+    if (primaryInstall) {
+        title = UCLocalize("INSTALL");
+        switch (purchaseAccess_) {
+            case CYCommercialPackageAccessSignIn:
+                title = CYLocalize(@"Sign In"); action = @selector(openRepositoryAccount);
+                detail = CYLocalize(@"Sign in through Manage Account first."); break;
+            case CYCommercialPackageAccessBuy:
+                title = [purchasePrice_ length] == 0 ? CYLocalize(@"Buy") :
+                    [NSString stringWithFormat:CYLocalize(@"Buy · %@"), (NSString *)purchasePrice_];
+                action = @selector(confirmCurrentPackagePurchase); detail = CYLocalize(@"Purchase"); break;
+            case CYCommercialPackageAccessRetry:
+                title = CYLocalize(@"Try Again"); action = @selector(refreshCommercialPurchaseAction);
+                detail = (NSString *)purchaseFailure_ ?: CYLocalize(@"The repository account rejected the request."); break;
+            case CYCommercialPackageAccessUnavailable:
+                title = CYLocalize(@"Manage Account"); action = @selector(openRepositoryAccount);
+                detail = CYLocalize(@"This package cannot be purchased."); break;
+            case CYCommercialPackageAccessUnknown:
+            case CYCommercialPackageAccessChecking: enabled = NO; break;
+            case CYCommercialPackageAccessInstall: break;
+        }
+    }
+    if (purchaseInfoPending_) {
+        detail = CYLocalize(@"Checking purchase…");
+        if (primaryInstall) enabled = NO;
+    }
+    if (purchaseInProgress_) { detail = CYLocalize(@"Purchasing\u2026"); enabled = NO; }
+    [modernDetail_ setAccountNotice:CYLocalize(@"Manage sign-ins and explore your purchases.")
+        target:self action:@selector(openRepositoryAccount)];
+    [modernDetail_ setActionTitle:title destructive:(buttons_.size() == 1 && [buttons_[0].first isEqualToString:@"REMOVE"])
+        target:self action:action];
+    [modernDetail_ setActionEnabled:enabled];
+    [modernDetail_ setActionStatusDetail:detail];
+}
+
+- (void) acceptCommercialPackageInfo:(NSDictionary *)info error:(NSError *)error {
+    purchasePrice_ = nil;
+    purchaseFailure_ = nil;
+    if (CYRepositoryAccountErrorRequiresSignIn(error)) purchaseAccess_ = CYCommercialPackageAccessSignIn;
+    else if (info == nil && CYRepositoryAccountErrorIsUnsupportedProvider(error)) purchaseAccess_ = CYCommercialPackageAccessInstall;
+    else if (info == nil) {
+        purchaseAccess_ = CYCommercialPackageAccessRetry;
+        purchaseFailure_ = [error localizedDescription];
+    } else if ([[info objectForKey:@"purchased"] boolValue]) purchaseAccess_ = CYCommercialPackageAccessInstall;
+    else if ([[info objectForKey:@"available"] boolValue]) {
+        purchaseAccess_ = CYCommercialPackageAccessBuy;
+        id price([info objectForKey:@"price"]);
+        purchasePrice_ = [price isKindOfClass:NSString.class] ? price : nil;
+    } else purchaseAccess_ = CYCommercialPackageAccessUnavailable;
+    purchaseCheckedAt_ = [NSDate timeIntervalSinceReferenceDate];
+}
+
+- (void) resumePendingCommercialAction {
+    if (pendingCommercialPackage_ == nil || purchaseInfoPending_ || purchaseTransitioning_) return;
+    Package *selected([[pendingCommercialPackage_ retain] autorelease]);
+    pendingCommercialPackage_ = nil;
+    if (pendingCommercialDatabaseEra_ != [database_ era] || [[self navigationController] topViewController] != self) return;
+    if (purchaseAccess_ == CYCommercialPackageAccessRetry) {
+        [self presentPurchaseError:purchaseFailure_]; return;
+    }
+    [self _clickButtonWithPackage:selected];
+}
+
+- (void) updateCommercialPurchaseAction:(BOOL)force {
     Source *source([package_ source]);
-    if (source == nil || package_ == nil)
-        return;
+    if (!commercial_ || package_ == nil || source == nil || purchaseInProgress_) return;
     NSString *repositoryURL([source rooturi]);
     NSString *packageID([package_ id]);
     NSString *model(Machine_ != NULL ? [NSString stringWithUTF8String:Machine_] : nil);
-    unsigned era(++purchaseEra_);
-    purchaseAccess_ = CYCommercialPackageAccessChecking;
-    BOOL primaryInstall(buttons_.size() == 1 && [buttons_[0].first isEqualToString:@"INSTALL"]);
-    [modernDetail_ setAccountNotice:CYLocalize(@"Checking purchase…") target:self action:@selector(openRepositoryAccount)];
-    if (primaryInstall) {
-        [modernDetail_ setActionTitle:CYLocalize(@"Checking purchase…") destructive:NO target:self action:@selector(refreshCommercialPurchaseAction)];
-        [modernDetail_ setActionEnabled:NO];
+    NSArray *identity(@[repositoryURL ?: @"", packageID ?: @"", [package_ latest] ?: @""]);
+    NSDictionary *account(CYRepositoryAccountStateSnapshot(repositoryURL));
+    NSUInteger revision([[account objectForKey:@"revision"] unsignedIntegerValue]);
+    if (![purchaseIdentity_ isEqual:identity] || purchaseAccountRevision_ != revision) {
+        ++purchaseEra_;
+        purchaseIdentity_ = identity;
+        purchaseAccountRevision_ = revision;
+        purchaseInfoPending_ = NO;
+        purchaseCheckedAt_ = 0;
+        purchaseAccess_ = CYCommercialPackageAccessUnknown;
+        purchasePrice_ = nil;
+        purchaseFailure_ = nil;
+        pendingCommercialPackage_ = nil;
+        purchaseReturnToVersions_ = NO;
     }
+    NSString *state([account objectForKey:@"state"]);
+    if ([state isEqualToString:@"signedOut"] || [state isEqualToString:@"unsupported"]) {
+        purchaseAccess_ = [state isEqualToString:@"signedOut"] ? CYCommercialPackageAccessSignIn : CYCommercialPackageAccessInstall;
+        [self renderCommercialPurchaseAction]; return;
+    }
+    NSDictionary *snapshot(CYRepositoryPackageInfoSnapshot(repositoryURL, packageID, UniqueID_, model));
+    if (!force && [[snapshot objectForKey:@"fresh"] boolValue]) {
+        [self acceptCommercialPackageInfo:[snapshot objectForKey:@"info"] error:[snapshot objectForKey:@"error"]];
+        [self renderCommercialPurchaseAction]; return;
+    }
+    NSTimeInterval age([NSDate timeIntervalSinceReferenceDate] - purchaseCheckedAt_);
+    NSTimeInterval lifetime(purchaseAccess_ == CYCommercialPackageAccessRetry ? 5.0 : 30.0);
+    if (purchaseInfoPending_ || (!force && snapshot == nil && purchaseCheckedAt_ > 0 && age >= 0 && age < lifetime)) {
+        [self renderCommercialPurchaseAction]; return;
+    }
+    if (purchaseAccess_ == CYCommercialPackageAccessUnknown) purchaseAccess_ = CYCommercialPackageAccessChecking;
+    purchaseInfoPending_ = YES;
+    unsigned era(++purchaseEra_);
+    [self renderCommercialPurchaseAction];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSError *error(nil);
         NSDictionary *info(CYRepositoryPackageInfo(repositoryURL, packageID, UniqueID_, model, &error));
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (era != purchaseEra_ || package_ == nil || ![[package_ id] isEqualToString:packageID])
-                return;
-            [modernDetail_ setActionEnabled:YES];
-            if (CYRepositoryAccountErrorRequiresSignIn(error)) {
-                purchaseAccess_ = CYCommercialPackageAccessSignIn;
-                [modernDetail_ setAccountNotice:CYLocalize(@"Sign in through Manage Account first.") target:self action:@selector(openRepositoryAccount)];
-                if (primaryInstall)
-                    [modernDetail_ setActionTitle:CYLocalize(@"Sign In") destructive:NO target:self action:@selector(openRepositoryAccount)];
-                return;
-            }
-            if (info == nil) {
-                if (CYRepositoryAccountErrorIsUnsupportedProvider(error)) {
-                    purchaseAccess_ = CYCommercialPackageAccessInstall;
-                    // Older commercial repositories may not implement this
-                    // account API. Keep their actions; download checks still apply.
-                    [modernDetail_ setAccountNotice:[error localizedDescription] target:self action:@selector(openRepositoryAccount)];
-                    if (primaryInstall)
-                        [modernDetail_ setActionTitle:UCLocalize("INSTALL") destructive:NO target:self action:@selector(customButtonClicked)];
-                    return;
-                }
-                purchaseAccess_ = CYCommercialPackageAccessRetry;
-                [modernDetail_ setAccountNotice:[error localizedDescription] ?: CYLocalize(@"The repository account rejected the request.") target:self action:@selector(openRepositoryAccount)];
-                if (primaryInstall)
-                    [modernDetail_ setActionTitle:CYLocalize(@"Retry") destructive:NO target:self action:@selector(refreshCommercialPurchaseAction)];
-                return;
-            }
-            if ([[info objectForKey:@"purchased"] boolValue]) {
-                purchaseAccess_ = CYCommercialPackageAccessInstall;
-                // Some providers allow downloading before activation in their
-                // Settings pane. Do not infer ownership from account item count.
-                [modernDetail_ setAccountNotice:nil target:nil action:NULL];
-                if (primaryInstall)
-                    [modernDetail_ setActionTitle:UCLocalize("INSTALL") destructive:NO target:self action:@selector(customButtonClicked)];
-            } else if ([[info objectForKey:@"available"] boolValue]) {
-                purchaseAccess_ = CYCommercialPackageAccessBuy;
-                purchasePrice_ = [info objectForKey:@"price"];
-                [modernDetail_ setAccountNotice:nil target:nil action:NULL];
-                if (primaryInstall) {
-                    NSString *price([info objectForKey:@"price"]);
-                    NSString *title([price length] == 0 ? CYLocalize(@"Buy") : [NSString stringWithFormat:CYLocalize(@"Buy · %@"), price]);
-                    [modernDetail_ setActionTitle:title destructive:NO target:self action:@selector(buyButtonClicked)];
-                }
-            } else {
-                purchaseAccess_ = CYCommercialPackageAccessUnavailable;
-                [modernDetail_ setAccountNotice:CYLocalize(@"This package cannot be purchased.") target:self action:@selector(openRepositoryAccount)];
-                if (primaryInstall)
-                    [modernDetail_ setActionTitle:CYLocalize(@"Manage Account") destructive:NO target:self action:@selector(openRepositoryAccount)];
-            }
+            if (era != purchaseEra_ || ![purchaseIdentity_ isEqual:identity]) return;
+            purchaseInfoPending_ = NO;
+            if (revision != CYRepositoryAccountStateRevision()) { [self updateCommercialPurchaseAction:NO]; return; }
+            [self acceptCommercialPackageInfo:info error:error];
+            [self renderCommercialPurchaseAction];
+            [self resumePendingCommercialAction];
         });
     });
+}
+
+- (void) repositoryAccountStateChanged:(NSNotification *)notification {
+    if (![self isViewLoaded] || purchaseInProgress_) return;
+    if ([[self navigationController] topViewController] != self) return;
+    if (purchaseRefreshOnActive_ && [[notification name] isEqualToString:UIApplicationDidBecomeActiveNotification]) {
+        purchaseRefreshOnActive_ = NO;
+        [self updateCommercialPurchaseAction:YES]; return;
+    }
+    [self updateCommercialPurchaseAction:NO];
+}
+
+- (void) confirmCurrentPackagePurchase {
+    [self confirmPurchaseForPackage:package_];
+}
+
+- (void) refreshCommercialPurchaseAction {
+    [self updateCommercialPurchaseAction:YES];
 }
 
 - (void) openRepositoryAccount {
@@ -8725,7 +8816,7 @@ enum CYCommercialPackageAccess {
         }
         return;
     }
-    ++purchaseEra_;
+    pendingCommercialPackage_ = nil;
     NSString *repositoryURL([source rooturi]);
     if ([repositoryURL length] == 0) return;
     NSString *repositoryName([source label] ?: [source name] ?: CYLocalize(@"Repository"));
@@ -8756,7 +8847,6 @@ enum CYCommercialPackageAccess {
             return metadata;
         }
     }];
-    returningFromRepositoryAccount_ = YES;
     [[self navigationController] pushViewController:accounts animated:YES];
 }
 
@@ -8770,18 +8860,54 @@ enum CYCommercialPackageAccess {
 
 - (void) viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    if (returningFromRepositoryAccount_) {
-        returningFromRepositoryAccount_ = NO;
-        [self reloadData];
-    }
+    // Re-evaluate on every appearance, including a cancelled interactive Back.
+    [self updateCommercialPurchaseAction:NO];
+    purchaseTransitioning_ = animated && [self transitionCoordinator] != nil;
+}
+
+- (void) viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    purchaseTransitioning_ = NO;
+    if (reloadAfterPurchaseTransition_) { reloadAfterPurchaseTransition_ = NO; [self reloadData]; }
+    BOOL force(purchaseRefreshOnActive_);
+    purchaseRefreshOnActive_ = NO;
+    [self updateCommercialPurchaseAction:force];
+    [self resumePendingCommercialAction];
+}
+
+- (void) viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    purchaseTransitioning_ = animated && [self transitionCoordinator] != nil;
+    pendingCommercialPackage_ = nil;
+}
+
+- (void) viewDidDisappear:(BOOL)animated {
+    [super viewDidDisappear:animated];
+    purchaseTransitioning_ = NO;
+    if (reloadAfterPurchaseTransition_) { reloadAfterPurchaseTransition_ = NO; [self reloadData]; }
+    [self renderCommercialPurchaseAction];
+}
+
+- (void) dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [detailIconTask_ cancel];
+    [purchaseSession_ cancel];
+    [super dealloc];
 }
 
 // A download choice in Modify or the version picker must explicitly disclose
 // that payment is needed before starting device/payment authentication.
 - (void) confirmPurchaseForPackage:(Package *)package {
-    if (package == nil || purchaseInProgress_) return;
+    if (package == nil || package_ == nil || purchaseInProgress_ ||
+        ![[package id] isEqualToString:[package_ id]]) return;
+    if (purchaseAccess_ != CYCommercialPackageAccessBuy ||
+        purchaseAccountRevision_ != CYRepositoryAccountStateRevision()) {
+        [self updateCommercialPurchaseAction:NO]; return;
+    }
     unsigned era([database_ era]);
     unsigned quoteEra(purchaseEra_);
+    NSUInteger revision(CYRepositoryAccountStateRevision());
+    NSString *confirmedPrice([NSString stringWithString:(NSString *)purchasePrice_ ?: @""]);
     UIViewController *presented([self presentedViewController]);
     if (presented != nil) {
         if ([presented isKindOfClass:UINavigationController.class] &&
@@ -8794,8 +8920,8 @@ enum CYCommercialPackageAccess {
         }
         return;
     }
-    NSString *title([purchasePrice_ length] == 0 ? CYLocalize(@"Buy") :
-        [NSString stringWithFormat:CYLocalize(@"Buy · %@"), (NSString *)purchasePrice_]);
+    NSString *title([confirmedPrice length] == 0 ? CYLocalize(@"Buy") :
+        [NSString stringWithFormat:CYLocalize(@"Buy · %@"), confirmedPrice]);
     UIAlertController *alert([UIAlertController alertControllerWithTitle:CYLocalize(@"Purchase")
         message:[NSString stringWithFormat:@"%@\n%@", [package name] ?: [package id], [package latest] ?: @""]
         preferredStyle:UIAlertControllerStyleAlert]);
@@ -8803,11 +8929,12 @@ enum CYCommercialPackageAccess {
     __block UIAlertController *confirmation(alert); // Nonretaining in this manual-reference-counted file.
     [alert addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         void (^beginPurchase)(void) = ^{
-            if (era != [database_ era] || quoteEra != purchaseEra_ || purchaseAccess_ != CYCommercialPackageAccessBuy) {
+            if (era != [database_ era] || quoteEra != purchaseEra_ ||
+                revision != CYRepositoryAccountStateRevision() || purchaseAccess_ != CYCommercialPackageAccessBuy) {
                 [self reloadData]; return;
             }
             purchaseReturnToVersions_ = ![[package latest] isEqualToString:[package_ latest]];
-            [self buyButtonClicked];
+            [self buyPackageWithConfirmedPrice:confirmedPrice];
         };
         id<UIViewControllerTransitionCoordinator> coordinator([confirmation transitionCoordinator]);
         if ([confirmation isBeingDismissed] && coordinator != nil) {
@@ -8819,78 +8946,148 @@ enum CYCommercialPackageAccess {
     [self presentViewController:alert animated:YES completion:nil];
 }
 
-- (void) buyButtonClicked {
-    if (purchaseInProgress_ || package_ == nil)
-        return;
+- (void) endCommercialPurchase {
+    purchaseInProgress_ = false;
+    purchaseReturnToVersions_ = NO;
+    purchaseInfoPending_ = NO;
+    pendingCommercialPackage_ = nil;
+    purchaseCheckedAt_ = 0;
+    ++purchaseEra_;
+}
+
+- (void) buyPackageWithConfirmedPrice:(NSString *)confirmedPrice {
+    if (purchaseInProgress_ || package_ == nil || purchaseAccess_ != CYCommercialPackageAccessBuy) return;
     Source *source([package_ source]);
-    if (source == nil)
-        return;
-    purchaseInProgress_ = true;
-    [modernDetail_ setActionTitle:CYLocalize(@"Purchasing\u2026") destructive:NO target:self action:@selector(buyButtonClicked)];
     NSString *repositoryURL([source rooturi]);
+    if ([repositoryURL length] == 0) return;
     NSString *packageID([package_ id]);
     NSString *model(Machine_ != NULL ? [NSString stringWithUTF8String:Machine_] : nil);
-    unsigned era(purchaseEra_);
+    unsigned databaseEra([database_ era]);
+    NSUInteger revision(CYRepositoryAccountStateRevision());
+    unsigned era(++purchaseEra_);
+    purchaseInProgress_ = true;
+    purchaseInfoPending_ = NO;
+    pendingCommercialPackage_ = nil;
+    [self renderCommercialPurchaseAction];
+    // A cached label is not a price authorization. Re-query immediately before
+    // payment; a new price requires another explicit confirmation.
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSString *actionURL(nil);
-        NSError *error(nil);
-        NSInteger status(CYRepositoryPurchase(repositoryURL, packageID, UniqueID_, model, &actionURL, &error));
+        NSError *infoError(nil);
+        NSDictionary *info(CYRepositoryPackageInfo(repositoryURL, packageID, UniqueID_, model, &infoError));
         dispatch_async(dispatch_get_main_queue(), ^{
-            purchaseInProgress_ = false;
-            if (era != purchaseEra_ || package_ == nil || ![[package_ id] isEqualToString:packageID])
-                return;
-            if (status == CYRepositoryPurchaseImmediateSuccess)
-                [self completePurchaseAndInstall];
-            else if (status == CYRepositoryPurchaseActionRequired && [actionURL length] != 0)
-                [self presentPurchaseAction:actionURL forPackage:packageID];
-            else if (status == CYRepositoryPurchaseCancelled)
-                [self reloadData];
-            else {
-                [self reloadData];
-                if (error != nil)
-                    [self presentPurchaseError:[error localizedDescription]];
+            if (era != purchaseEra_) return;
+            if (databaseEra != [database_ era] || revision != CYRepositoryAccountStateRevision() ||
+                package_ == nil || ![[package_ id] isEqualToString:packageID]) {
+                [self endCommercialPurchase]; [self updateCommercialPurchaseAction:NO]; return;
             }
+            [self acceptCommercialPackageInfo:info error:infoError];
+            if (info == nil || ![[info objectForKey:@"available"] boolValue]) {
+                // Purchased but no longer offered packages may still be downloadable.
+                if (info != nil && [[info objectForKey:@"purchased"] boolValue]) {
+                    [self installConfirmedCommercialPackage]; return;
+                }
+                [self endCommercialPurchase]; [self renderCommercialPurchaseAction];
+                [self presentPurchaseError:infoError != nil ? [infoError localizedDescription] : CYLocalize(@"This package cannot be purchased.")];
+                return;
+            }
+            if ([[info objectForKey:@"purchased"] boolValue]) {
+                [self installConfirmedCommercialPackage]; return;
+            }
+            NSString *price([info objectForKey:@"price"]);
+            if (![price isKindOfClass:NSString.class] || ![price isEqualToString:confirmedPrice]) {
+                [self endCommercialPurchase]; [self renderCommercialPurchaseAction];
+                [self presentPurchaseError:CYLocalize(@"The price changed. Review the updated price and confirm again.")];
+                return;
+            }
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                NSString *actionURL(nil);
+                NSError *error(nil);
+                NSInteger status(CYRepositoryPurchaseCancelled);
+                if (revision == CYRepositoryAccountStateRevision())
+                    status = CYRepositoryPurchase(repositoryURL, packageID, UniqueID_, model, &actionURL, &error);
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (era != purchaseEra_) return;
+                    if (databaseEra != [database_ era] || revision != CYRepositoryAccountStateRevision() ||
+                        package_ == nil || ![[package_ id] isEqualToString:packageID]) {
+                        if (status == CYRepositoryPurchaseImmediateSuccess)
+                            CYRepositoryAccountPurchaseDidComplete(repositoryURL);
+                        [self endCommercialPurchase]; [self updateCommercialPurchaseAction:NO]; return;
+                    }
+                    if (status == CYRepositoryPurchaseImmediateSuccess)
+                        [self completePurchaseAndInstall];
+                    else if (status == CYRepositoryPurchaseActionRequired && [actionURL length] != 0)
+                        [self presentPurchaseAction:actionURL forPackage:packageID];
+                    else {
+                        [self endCommercialPurchase]; [self updateCommercialPurchaseAction:YES];
+                        if (status != CYRepositoryPurchaseCancelled)
+                            [self presentPurchaseError:[error localizedDescription]];
+                    }
+                });
+            });
         });
     });
 }
 
-- (void) completePurchaseAndInstall {
-    // The purchase is confirmed by the provider; refresh the package state and
-    // queue the install. authorize_download re-verifies ownership at fetch time
-    // and APT hash/size checks remain enforced.
+- (void) installConfirmedCommercialPackage {
+    if (!purchaseInProgress_ || package_ == nil) return;
     BOOL chooseVersion(purchaseReturnToVersions_);
+    purchaseInProgress_ = false;
+    purchaseReturnToVersions_ = NO;
+    purchaseInfoPending_ = NO;
+    pendingCommercialPackage_ = nil;
+    ++purchaseEra_;
+    purchaseAccountRevision_ = CYRepositoryAccountStateRevision();
+    purchaseAccess_ = CYCommercialPackageAccessInstall;
+    purchasePrice_ = nil;
+    purchaseFailure_ = nil;
+    purchaseCheckedAt_ = [NSDate timeIntervalSinceReferenceDate];
     [self reloadData];
-    if (package_ != nil) {
-        // A purchase grants access to the package, not permission to replace an
-        // explicitly selected older version with the latest one.
-        if (chooseVersion) {
-            purchaseAccess_ = CYCommercialPackageAccessInstall;
-            if ([versions_ count] != 0) [self _clickButtonWithName:@"DOWNGRADE"];
-        } else [self.delegate installPackage:package_];
-    }
+    if (package_ == nil) return;
+    // A purchase grants access to the package, not permission to replace an
+    // explicitly selected older version with the latest one.
+    if (chooseVersion) {
+        if ([versions_ count] != 0) [self _clickButtonWithName:@"DOWNGRADE"];
+    } else [self.delegate installPackage:package_];
+}
+
+- (void) completePurchaseAndInstall {
+    if (!purchaseInProgress_ || package_ == nil) return;
+    CYRepositoryAccountPurchaseDidComplete([[package_ source] rooturi]);
+    // authorize_download still re-verifies ownership at fetch time; APT's
+    // archive hash and size checks remain enforced.
+    [self installConfirmedCommercialPackage];
 }
 
 - (void) presentPurchaseAction:(NSString *)urlString forPackage:(NSString *)packageID {
     NSURL *url([NSURL URLWithString:urlString]);
-    if (url == nil)
-        return;
+    if (url == nil || ![[[url scheme] lowercaseString] isEqualToString:@"https"] || [[url host] length] == 0) {
+        [self endCommercialPurchase]; [self updateCommercialPurchaseAction:NO];
+        [self presentPurchaseError:CYLocalize(@"The secure purchase session could not start.")]; return;
+    }
     [purchaseSession_ cancel];
     unsigned era(purchaseEra_);
+    unsigned databaseEra([database_ era]);
+    NSUInteger revision(CYRepositoryAccountStateRevision());
     ASWebAuthenticationSession *session([[[ASWebAuthenticationSession alloc]
         initWithURL:url callbackURLScheme:@"sileo" completionHandler:^(NSURL *callbackURL, NSError *sessionError) {
             dispatch_async(dispatch_get_main_queue(), ^{
+                // A late cancelled session must not clear a newer session.
+                if (era != purchaseEra_) return;
                 purchaseSession_ = nil;
-                if (era != purchaseEra_ || package_ == nil || ![[package_ id] isEqualToString:packageID])
-                    return;
-                // Auto-install only when the provider confirmed the payment
-                // (sileo://payment_completed). Any other outcome (dismissed,
-                // failed) just re-queries the authoritative purchase state.
-                NSString *host(sessionError == nil ?
-                    [[[NSURLComponents componentsWithURL:callbackURL resolvingAgainstBaseURL:NO] host] lowercaseString] : nil);
-                if ([host isEqualToString:@"payment_completed"])
+                if (databaseEra != [database_ era] || revision != CYRepositoryAccountStateRevision() ||
+                    package_ == nil || ![[package_ id] isEqualToString:packageID]) {
+                    [self endCommercialPurchase]; [self updateCommercialPurchaseAction:NO]; return;
+                }
+                NSURLComponents *callback(sessionError == nil && callbackURL != nil ?
+                    [NSURLComponents componentsWithURL:callbackURL resolvingAgainstBaseURL:NO] : nil);
+                if ([[[callback scheme] lowercaseString] isEqualToString:@"sileo"] &&
+                    [[[callback host] lowercaseString] isEqualToString:@"payment_completed"])
                     [self completePurchaseAndInstall];
-                else
-                    [self reloadData];
+                else {
+                    [self endCommercialPurchase]; [self updateCommercialPurchaseAction:YES];
+                    if (sessionError != nil && [sessionError code] != ASWebAuthenticationSessionErrorCodeCanceledLogin)
+                        [self presentPurchaseError:[sessionError localizedDescription]];
+                }
             });
         }] autorelease]);
     purchaseSession_ = session;
@@ -8898,25 +9095,15 @@ enum CYCommercialPackageAccess {
     [session setPrefersEphemeralWebBrowserSession:NO];
     if (![session start]) {
         purchaseSession_ = nil;
-        // Some providers only complete payment on a full web page that the
-        // in-app authentication session refuses to host. Open it in the system
-        // browser instead so the purchase can still be completed for every
-        // repository, and re-check the authoritative purchase state the moment
-        // the user returns to Cydia.
+        [self endCommercialPurchase];
         if ([[UIApplication sharedApplication] canOpenURL:url]) {
-            unsigned returnEra(purchaseEra_);
-            __block id observer(nil);
-            observer = [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
-                object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
-                    [[NSNotificationCenter defaultCenter] removeObserver:observer];
-                    if (returnEra == purchaseEra_ && package_ != nil && [[package_ id] isEqualToString:packageID])
-                        [self reloadData];
-                }];
+            // The controller's existing active notification refreshes the
+            // authoritative state on return; an external browser never auto-installs.
+            purchaseRefreshOnActive_ = YES;
             [[UIApplication sharedApplication] openURL:url options:[NSDictionary dictionary] completionHandler:nil];
             [self presentPurchaseError:CYLocalize(@"Complete the purchase in the browser that just opened, then return to Cydia.")];
-        } else {
-            [self presentPurchaseError:CYLocalize(@"The secure purchase session could not start.")];
-        }
+        } else [self presentPurchaseError:CYLocalize(@"The secure purchase session could not start.")];
+        [self renderCommercialPurchaseAction];
     }
 }
 
@@ -13794,7 +13981,6 @@ _end
 }
 
 - (void) applicationDidFinishLaunching:(id)unused {
-    NSSetUncaughtExceptionHandler(&CYRootlessUncaughtExceptionHandler);
     NSString *appVersion([[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"<unknown>");
     NSString *appBuild([[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"<unknown>");
     CYRootlessDiag(@"SESSION", @"begin format=2 appVersion=%@ appBuild=%@ ios=%@ uid=%d euid=%d",

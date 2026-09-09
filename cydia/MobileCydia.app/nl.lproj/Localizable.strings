@@ -526,3 +526,6 @@
 /* Commercial package status. */
 "Modern.Paid package" = "Betaald pakket";
 "Modern.Checking purchase…" = "Aankoopstatus controleren…";
+
+/* Updated purchase quote. */
+"Modern.The price changed. Review the updated price and confirm again." = "De prijs is gewijzigd. Controleer de bijgewerkte prijs en bevestig opnieuw.";

@@ -1,1 +1,1 @@
-#define CYDIA_VERSION "1.1.25"
+#define CYDIA_VERSION "1.1.26"

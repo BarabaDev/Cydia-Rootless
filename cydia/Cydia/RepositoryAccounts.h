@@ -9,6 +9,31 @@
 FOUNDATION_EXPORT NSString *const CYRepositoryAccountNameKey;
 FOUNDATION_EXPORT NSString *const CYRepositoryAccountURLKey;
 
+/* Presentation-only account state. Changes are posted on the main thread after
+ * sign-in, sign-out, expiry or confirmed entitlement change. userInfo contains
+ * "revision" (NSNumber); no credential values are exposed. */
+FOUNDATION_EXPORT NSString *const CYRepositoryAccountStateDidChangeNotification;
+FOUNDATION_EXPORT NSUInteger CYRepositoryAccountStateRevision(void);
+
+/* Memory-only, safe on the main thread. Keys: "revision" (NSNumber), "state"
+ * (NSString: unknown/signedOut/signedIn/unsupported). Unknown means this process
+ * has not learned the provider/account state yet; this performs no discovery or
+ * Keychain lookup and does not authorize a purchase or download. */
+FOUNDATION_EXPORT NSDictionary *CYRepositoryAccountStateSnapshot(NSString *repositoryURL);
+
+/* Memory-only display snapshot, or nil when unknown/invalidated. Keys:
+ * "revision", "fresh" (NSNumber), optional "info" (NSDictionary) / "error"
+ * (NSError). Successful quotes expire after 30 seconds; transient errors after
+ * 5 seconds. A stale quote may be displayed but must be refreshed before Buy.
+ * Fresh CYRepositoryPackageInfo queries record only unchanged-revision results.
+ * Async callers must also compare the captured revision before applying a result. */
+FOUNDATION_EXPORT NSDictionary *CYRepositoryPackageInfoSnapshot(NSString *repositoryURL,
+    NSString *packageIdentifier, NSString *deviceIdentifier, NSString *deviceModel);
+
+/* Call once after confirmed purchase completion, including browser completion.
+ * Invalidates display quotes and notifies observers without changing credentials. */
+FOUNDATION_EXPORT void CYRepositoryAccountPurchaseDidComplete(NSString *repositoryURL);
+
 /* Resolves a purchased package identifier to display metadata for the modern
  * Purchased Packages list. Result keys (all optional): "name" (NSString),
  * "summary" (NSString), "icon" (UIImage), "installed" (NSNumber BOOL).

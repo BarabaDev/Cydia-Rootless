@@ -526,3 +526,6 @@
 /* Commercial package status. */
 "Modern.Paid package" = "Πακέτο επί πληρωμή";
 "Modern.Checking purchase…" = "Έλεγχος κατάστασης αγοράς…";
+
+/* Updated purchase quote. */
+"Modern.The price changed. Review the updated price and confirm again." = "Η τιμή άλλαξε. Ελέγξτε την ενημερωμένη τιμή και επιβεβαιώστε ξανά.";

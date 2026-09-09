@@ -1,4 +1,4 @@
-/* Cydia 1.1.25 Rootless - repository accounts compatible with Sileo's API. */
+/* Cydia 1.1.26 Rootless - repository accounts compatible with Sileo's API. */
 
 #include "Cydia/ModernLocalization.h"
 #include "Cydia/RepositoryAccounts.h"
@@ -11,6 +11,7 @@
 
 NSString *const CYRepositoryAccountNameKey = @"name";
 NSString *const CYRepositoryAccountURLKey = @"url";
+NSString *const CYRepositoryAccountStateDidChangeNotification = @"CYRepositoryAccountStateDidChange";
 NSString *const CYRepositoryPurchasedIconDidLoadNotification = @"CYRepositoryPurchasedIconDidLoad";
 NSString *const CYRepositoryPackageLibraryDidReloadNotification = @"CYRepositoryPackageLibraryDidReload";
 NSString *const CYRepositoryPurchasedPackageKey = @"CYRepositoryPurchasedPackage";
@@ -99,7 +100,7 @@ static NSData *CYRepositoryRequest(NSURL *url, NSString *method, NSDictionary *b
 
     NSMutableURLRequest *request([NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:20.0]);
     [request setHTTPMethod:method ?: @"GET"];
-    [request setValue:@"Cydia/1.1.25" forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"Cydia/1.1.26" forHTTPHeaderField:@"User-Agent"];
     [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
     if (body != nil) {
         NSError *jsonError(nil);
@@ -199,6 +200,27 @@ static NSDictionary *CYRepositoryJSON(NSURL *url, NSString *method, NSDictionary
     return dictionary;
 }
 
+// Match equivalent repository spelling without merging distinct paths, query
+// strings or providers. Existing provider URLs remain the Keychain identities.
+static NSString *CYRepositoryPresentationRoot(NSString *repositoryURL) {
+    NSURLComponents *components([NSURLComponents componentsWithString:repositoryURL]);
+    if ([[components host] length] == 0 || [[components scheme] length] == 0)
+        return nil;
+    [components setScheme:[[components scheme] lowercaseString]];
+    [components setHost:[[components host] lowercaseString]];
+    if (([[components scheme] isEqualToString:@"https"] && [[components port] integerValue] == 443) ||
+        ([[components scheme] isEqualToString:@"http"] && [[components port] integerValue] == 80))
+        [components setPort:nil];
+    NSString *path([components percentEncodedPath]);
+    while ([path hasSuffix:@"/"])
+        path = [path substringToIndex:[path length] - 1];
+    [components setPercentEncodedPath:path];
+    return [[components URL] absoluteString];
+}
+
+static void CYRememberRepositoryProvider(NSString *repositoryURL, NSURL *provider);
+static void CYRememberUnsupportedRepository(NSString *repositoryURL);
+
 static NSMutableDictionary *CYRepositoryPaymentProviderCache(void) {
     static NSMutableDictionary *cache(nil);
     static dispatch_once_t once;
@@ -217,12 +239,13 @@ static NSURL *CYRepositoryPaymentProvider(NSString *repositoryURL, NSError **err
                 CYLocalize(@"Paid repositories must use HTTPS."));
         return nil;
     }
-    NSString *cacheKey([[repository absoluteString]
-        stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]]);
+    NSString *cacheKey(CYRepositoryPresentationRoot(repositoryURL));
     @synchronized (CYRepositoryPaymentProviderCache()) {
         NSURL *cached([CYRepositoryPaymentProviderCache() objectForKey:cacheKey]);
-        if (cached != nil)
+        if (cached != nil) {
+            CYRememberRepositoryProvider(repositoryURL, cached);
             return cached;
+        }
     }
 
     NSError *discoveryError(nil);
@@ -251,6 +274,7 @@ static NSURL *CYRepositoryPaymentProvider(NSString *repositoryURL, NSError **err
     @synchronized (CYRepositoryPaymentProviderCache()) {
         [CYRepositoryPaymentProviderCache() setObject:provider forKey:cacheKey];
     }
+    CYRememberRepositoryProvider(repositoryURL, provider);
     return provider;
 }
 
@@ -282,16 +306,134 @@ static NSMutableDictionary *CYRepositoryCredentialGenerations(void) {
 
 static NSUInteger CYRepositoryCredentialsGeneration_;
 
+// All presentation maps share the credential lock, but contain no tokens or
+// payment secrets. Discovery/reads never advance the public revision.
+static NSMutableDictionary *CYRepositoryKnownProviders(void) {
+    static NSMutableDictionary *values;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ values = [[NSMutableDictionary alloc] init]; });
+    return values;
+}
+static NSMutableDictionary *CYRepositoryKnownAccountStates(void) {
+    static NSMutableDictionary *values;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ values = [[NSMutableDictionary alloc] init]; });
+    return values;
+}
+static NSMutableSet *CYRepositoryUnsupportedRoots(void) {
+    static NSMutableSet *values;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ values = [[NSMutableSet alloc] init]; });
+    return values;
+}
+static NSCache *CYRepositoryPackagePresentationCache(void) {
+    static NSCache *values;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        values = [[NSCache alloc] init];
+        [values setCountLimit:128];
+    });
+    return values;
+}
+static NSUInteger CYRepositoryAccountStateRevision_;
+static BOOL CYRepositoryAccountNotificationPending_;
+
+NSUInteger CYRepositoryAccountStateRevision(void) {
+    @synchronized (CYRepositoryCredentialGenerations()) {
+        return CYRepositoryAccountStateRevision_;
+    }
+}
+
+static void CYAdvanceRepositoryAccountState(void) {
+    // Caller holds the shared lock. Notify only after the mutation completes;
+    // several changes in one sign-in callback produce one settled notification.
+    ++CYRepositoryAccountStateRevision_;
+    [CYRepositoryPackagePresentationCache() removeAllObjects];
+    if (CYRepositoryAccountNotificationPending_)
+        return;
+    CYRepositoryAccountNotificationPending_ = YES;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSUInteger revision;
+        @synchronized (CYRepositoryCredentialGenerations()) {
+            CYRepositoryAccountNotificationPending_ = NO;
+            revision = CYRepositoryAccountStateRevision_;
+        }
+        [[NSNotificationCenter defaultCenter] postNotificationName:CYRepositoryAccountStateDidChangeNotification
+            object:nil userInfo:@{@"revision":@(revision)}];
+    });
+}
+
+static void CYRememberRepositoryProvider(NSString *repositoryURL, NSURL *provider) {
+    NSString *root(CYRepositoryPresentationRoot(repositoryURL));
+    if (root == nil || provider == nil) return;
+    @synchronized (CYRepositoryCredentialGenerations()) {
+        [CYRepositoryKnownProviders() setObject:[provider absoluteString] forKey:root];
+        [CYRepositoryUnsupportedRoots() removeObject:root];
+    }
+}
+
+static void CYRememberUnsupportedRepository(NSString *repositoryURL) {
+    NSString *root(CYRepositoryPresentationRoot(repositoryURL));
+    if (root == nil) return;
+    @synchronized (CYRepositoryCredentialGenerations()) {
+        [CYRepositoryUnsupportedRoots() addObject:root];
+    }
+}
+
+NSDictionary *CYRepositoryAccountStateSnapshot(NSString *repositoryURL) {
+    NSString *root(CYRepositoryPresentationRoot(repositoryURL));
+    @synchronized (CYRepositoryCredentialGenerations()) {
+        NSString *provider(root == nil ? nil : [CYRepositoryKnownProviders() objectForKey:root]);
+        NSString *state(provider == nil ? nil : [CYRepositoryKnownAccountStates() objectForKey:provider]);
+        if (root != nil && [CYRepositoryUnsupportedRoots() containsObject:root])
+            state = @"unsupported";
+        return @{@"revision":@(CYRepositoryAccountStateRevision_), @"state":state ?: @"unknown"};
+    }
+}
+
+static NSArray *CYRepositoryPackagePresentationKey(NSString *repositoryURL, NSString *packageIdentifier,
+    NSString *deviceIdentifier, NSString *deviceModel) {
+    NSString *root(CYRepositoryPresentationRoot(repositoryURL));
+    if (root == nil || [packageIdentifier length] == 0) return nil;
+    return @[root, packageIdentifier, deviceIdentifier ?: @"", deviceModel ?: @""];
+}
+
+NSDictionary *CYRepositoryPackageInfoSnapshot(NSString *repositoryURL, NSString *packageIdentifier,
+    NSString *deviceIdentifier, NSString *deviceModel) {
+    NSArray *key(CYRepositoryPackagePresentationKey(repositoryURL, packageIdentifier, deviceIdentifier, deviceModel));
+    if (key == nil) return nil;
+    @synchronized (CYRepositoryCredentialGenerations()) {
+        NSDictionary *cached([CYRepositoryPackagePresentationCache() objectForKey:key]);
+        if (cached == nil || [[cached objectForKey:@"revision"] unsignedIntegerValue] != CYRepositoryAccountStateRevision_)
+            return nil;
+        NSTimeInterval age(-[[cached objectForKey:@"date"] timeIntervalSinceNow]);
+        NSMutableDictionary *snapshot([NSMutableDictionary dictionaryWithDictionary:cached]);
+        [snapshot removeObjectForKey:@"date"];
+        [snapshot removeObjectForKey:@"lifetime"];
+        [snapshot setObject:@(age >= 0 && age <= [[cached objectForKey:@"lifetime"] doubleValue]) forKey:@"fresh"];
+        return snapshot;
+    }
+}
+
+void CYRepositoryAccountPurchaseDidComplete(NSString *repositoryURL) {
+    if (CYRepositoryPresentationRoot(repositoryURL) == nil) return;
+    @synchronized (CYRepositoryCredentialGenerations()) {
+        CYAdvanceRepositoryAccountState();
+    }
+}
+
 static NSUInteger CYRepositoryCredentialsGeneration(void) {
     @synchronized (CYRepositoryCredentialGenerations()) {
         return CYRepositoryCredentialsGeneration_;
     }
 }
 
-static void CYAdvanceRepositoryCredentialsGeneration(NSURL *provider) {
+static void CYAdvanceRepositoryCredentialsGeneration(NSURL *provider, NSString *state) {
     // Called while holding the shared credential lock.
     [CYRepositoryCredentialGenerations() setObject:@(++CYRepositoryCredentialsGeneration_)
         forKey:[provider absoluteString]];
+    [CYRepositoryKnownAccountStates() setObject:state forKey:[provider absoluteString]];
+    CYAdvanceRepositoryAccountState();
 }
 
 static NSString *CYRepositoryToken(NSURL *provider, NSUInteger *generation = NULL) {
@@ -306,12 +448,18 @@ static NSString *CYRepositoryToken(NSURL *provider, NSUInteger *generation = NUL
         [query setObject:(id) kSecMatchLimitOne forKey:(id) kSecMatchLimit];
         CFTypeRef result(NULL);
         OSStatus status(SecItemCopyMatching((CFDictionaryRef) query, &result));
-        if (status != errSecSuccess || result == NULL)
+        if (status != errSecSuccess || result == NULL) {
+            if (status == errSecItemNotFound)
+                [CYRepositoryKnownAccountStates() setObject:@"signedOut" forKey:[provider absoluteString]];
             return nil;
+        }
         NSData *data([(NSData *) result autorelease]);
         NSString *token([[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease]);
-        if (!CYValidRepositoryCredential(token, 4096))
+        if (!CYValidRepositoryCredential(token, 4096)) {
+            [CYRepositoryKnownAccountStates() setObject:@"signedOut" forKey:[provider absoluteString]];
             return nil;
+        }
+        [CYRepositoryKnownAccountStates() setObject:@"signedIn" forKey:[provider absoluteString]];
         return [token stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     }
 }
@@ -359,7 +507,7 @@ static BOOL CYStoreRepositoryCredential(NSURL *provider, NSString *credential, N
             return NO;
         }
         if ([service isEqualToString:CYRepositoryAccountKeychainService])
-            CYAdvanceRepositoryCredentialsGeneration(provider);
+            CYAdvanceRepositoryCredentialsGeneration(provider, @"signedIn");
         return YES;
     }
 }
@@ -380,7 +528,8 @@ static void CYDeleteRepositoryToken(NSURL *provider) {
             OSStatus tokenStatus(SecItemDelete((CFDictionaryRef) CYKeychainQuery(provider, CYRepositoryAccountKeychainService)));
             OSStatus secretStatus(SecItemDelete((CFDictionaryRef) CYKeychainQuery(provider, CYRepositoryAccountSecretKeychainService)));
             if (tokenStatus == errSecSuccess || secretStatus == errSecSuccess)
-                CYAdvanceRepositoryCredentialsGeneration(provider);
+                CYAdvanceRepositoryCredentialsGeneration(provider,
+                    tokenStatus == errSecSuccess || tokenStatus == errSecItemNotFound ? @"signedOut" : @"unknown");
         }
     }
 }
@@ -482,7 +631,7 @@ NSString *CYRepositoryAuthorizedDownloadURL(
     return [downloadURL absoluteString];
 }
 
-NSDictionary *CYRepositoryPackageInfo(
+static NSDictionary *CYRepositoryQueryPackageInfo(
     NSString *repositoryURL,
     NSString *packageIdentifier,
     NSString *deviceIdentifier,
@@ -527,6 +676,30 @@ NSDictionary *CYRepositoryPackageInfo(
         [NSNumber numberWithBool:([purchased respondsToSelector:@selector(boolValue)] && [purchased boolValue])], @"purchased",
         [NSNumber numberWithBool:([available respondsToSelector:@selector(boolValue)] && [available boolValue])], @"available",
     nil];
+}
+
+NSDictionary *CYRepositoryPackageInfo(
+    NSString *repositoryURL, NSString *packageIdentifier, NSString *deviceIdentifier,
+    NSString *deviceModel, NSError **error
+) {
+    NSUInteger revision(CYRepositoryAccountStateRevision());
+    NSError *queryError(nil);
+    NSDictionary *info(CYRepositoryQueryPackageInfo(repositoryURL, packageIdentifier, deviceIdentifier, deviceModel, &queryError));
+    NSArray *key(CYRepositoryPackagePresentationKey(repositoryURL, packageIdentifier, deviceIdentifier, deviceModel));
+    @synchronized (CYRepositoryCredentialGenerations()) {
+        if (revision == CYRepositoryAccountStateRevision_ && CYRepositoryAccountErrorIsUnsupportedProvider(queryError))
+            CYRememberUnsupportedRepository(repositoryURL);
+        if (key != nil && revision == CYRepositoryAccountStateRevision_ && (info != nil || queryError != nil)) {
+            BOOL stableError(CYRepositoryAccountErrorRequiresSignIn(queryError) || CYRepositoryAccountErrorIsUnsupportedProvider(queryError));
+            NSMutableDictionary *snapshot([NSMutableDictionary dictionaryWithDictionary:@{
+                @"revision":@(revision), @"date":[NSDate date], @"lifetime":@(info != nil || stableError ? 30.0 : 5.0)}]);
+            if (info != nil) [snapshot setObject:info forKey:@"info"];
+            if (queryError != nil) [snapshot setObject:queryError forKey:@"error"];
+            [CYRepositoryPackagePresentationCache() setObject:snapshot forKey:key];
+        }
+    }
+    if (error != NULL) *error = queryError;
+    return info;
 }
 
 NSInteger CYRepositoryPurchase(
@@ -591,12 +764,25 @@ NSInteger CYRepositoryPurchase(
         return CYRepositoryPurchaseFailed;
     }
 
+    // Authentication can outlast an account change. Snapshot matching account
+    // credentials together, without holding the credential lock across I/O.
+    NSString *secret(nil);
+    @synchronized (CYRepositoryCredentialGenerations()) {
+        NSUInteger currentGeneration;
+        NSString *current(CYRepositoryToken(provider, &currentGeneration));
+        if (credentialGeneration != currentGeneration || ![current isEqualToString:token]) {
+            if (error != NULL)
+                *error = CYAccountError(CYRepositoryAccountErrorNotSignedIn, CYLocalize(@"Sign in through Manage Account first."));
+            return CYRepositoryPurchaseFailed;
+        }
+        secret = includePaymentSecret ? CYRepositorySecret(provider) : nil;
+    }
+
     NSMutableDictionary *body([NSMutableDictionary dictionaryWithObjectsAndKeys:
         token, @"token",
         deviceIdentifier ?: @"", @"udid",
         deviceModel ?: @"", @"device",
     nil]);
-    NSString *secret(includePaymentSecret ? CYRepositorySecret(provider) : nil);
     if ([secret length] != 0)
         [body setObject:secret forKey:@"payment_secret"];
 

@@ -1,3 +1,16 @@
+# Cydia 1.1.26
+
+Paid-package and interface stability update by BarabaDev on **9 September 2026**.
+
+- Paid-package Details uses the same account and purchase state whether one or several package versions are available. Sign In remains the next action when the repository requires authentication; Clear and Remove remain available.
+- Account guidance and its Manage Account link stay in place while purchase information refreshes. Checking, retry and purchase status update within the existing action area instead of inserting and removing a card.
+- Purchase confirmation checks the latest repository price before payment. A changed price requires another review and confirmation, with an explanation in all 21 existing localizations.
+- Returning from a repository account refreshes the package's account state, and outdated account requests cannot replace newer sign-in or purchase information.
+- Home reuses existing banner cards when their identity and order are unchanged, preserving visible artwork and carousel position during refreshes. Uncached artwork still depends on the repository connection.
+- Removed automatic creation, rotation and email attachment of the Cydia Rootless diagnostics file. Upgrade cleanup is limited to the previous app-owned diagnostic files; APT and dpkg operational logs are retained.
+
+The package version is `1.1.26` and the architecture is `iphoneos-arm64`. Simulator and build checks do not replace validation of purchases, installation and restart behavior on a rootless device.
+
 # Cydia 1.1.25
 
 Reliability and repository-account update by BarabaDev on **9 September 2026**.

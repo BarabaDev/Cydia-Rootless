@@ -526,3 +526,6 @@
 /* Commercial package status. */
 "Modern.Paid package" = "Ücretli paket";
 "Modern.Checking purchase…" = "Satın alma durumu kontrol ediliyor…";
+
+/* Updated purchase quote. */
+"Modern.The price changed. Review the updated price and confirm again." = "Fiyat değişti. Güncel fiyatı kontrol edip tekrar onaylayın.";

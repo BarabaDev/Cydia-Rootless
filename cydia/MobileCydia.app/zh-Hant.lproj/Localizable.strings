@@ -526,3 +526,6 @@
 /* Commercial package status. */
 "Modern.Paid package" = "付費套件";
 "Modern.Checking purchase…" = "正在檢查購買狀態…";
+
+/* Updated purchase quote. */
+"Modern.The price changed. Review the updated price and confirm again." = "價格已變更。請查看更新後的價格並再次確認。";

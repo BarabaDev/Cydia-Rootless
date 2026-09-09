@@ -527,3 +527,6 @@
 /* Commercial package status. */
 "Modern.Paid package" = "חבילה בתשלום";
 "Modern.Checking purchase…" = "בדיקת מצב הרכישה…";
+
+/* Updated purchase quote. */
+"Modern.The price changed. Review the updated price and confirm again." = "המחיר השתנה. יש לבדוק את המחיר המעודכן ולאשר שוב.";

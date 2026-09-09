@@ -60,6 +60,12 @@ echo "[ok] bz2, gzip, lz4, zstd and xz Packages index runtimes are declared"
 echo
 echo "[mach-o] checking rootless runtime library search path"
 [[ -e MobileCydia ]] || fail "MobileCydia build output is missing"
+for runtime_binary in MobileCydia cydo; do
+    [[ -f "$runtime_binary" ]] || fail "runtime build output is missing: $runtime_binary"
+    ! LC_ALL=C grep -aFq 'Cydia_Rootless_Diagnostics.log' "$runtime_binary" || \
+        fail "removed diagnostic filename remains in runtime binary: $runtime_binary"
+done
+echo "[ok] application and privileged helper contain no runtime diagnostic filename"
 if ! otool -l MobileCydia | grep -A3 'cmd LC_RPATH' | grep -Fq 'path /var/jb/usr/lib '; then
     fail "MobileCydia is missing LC_RPATH /var/jb/usr/lib"
 fi
@@ -225,17 +231,17 @@ else
     dpkg-deb -x Cydia.deb "$tmppayload"
 fi
 [[ -f "$packaged_plist" ]] || fail "packaged Cydia.app Info.plist is missing"
-grep -A1 '<key>CFBundleShortVersionString</key>' "$packaged_plist" | grep -Fq '<string>1.1.25</string>' || \
-    fail "packaged Cydia.app public version is not 1.1.25"
-grep -A1 '<key>CFBundleVersion</key>' "$packaged_plist" | grep -Fq '<string>1.1.25</string>' || \
-    fail "packaged Cydia.app does not select final bundle version 1.1.25"
+grep -A1 '<key>CFBundleShortVersionString</key>' "$packaged_plist" | grep -Fq '<string>1.1.26</string>' || \
+    fail "packaged Cydia.app public version is not 1.1.26"
+grep -A1 '<key>CFBundleVersion</key>' "$packaged_plist" | grep -Fq '<string>1.1.26</string>' || \
+    fail "packaged Cydia.app does not select final bundle version 1.1.26"
 ! grep -Fq '<key>UIUserInterfaceStyle</key>' "$packaged_plist" || \
     fail "packaged Cydia.app still forces a fixed interface style"
 grep -A1 '<key>UILaunchStoryboardName</key>' "$packaged_plist" | grep -Fq '<string>LaunchScreen</string>' || \
     fail "packaged Cydia.app does not select the adaptive native launch screen"
 ! grep -Fq '<key>UILaunchImages</key>' "$packaged_plist" || \
     fail "packaged Cydia.app still selects legacy fixed-size launch images"
-echo "[ok] packaged Cydia.app is public version 1.1.25, final bundle version 1.1.25, with automatic Light/Dark appearance"
+echo "[ok] packaged Cydia.app is public version 1.1.26, final bundle version 1.1.26, with automatic Light/Dark appearance"
 
 if ! grep -Eq '^-rwsr-sr-x .* \./var/jb/usr/libexec/cydia/cydo$' <<<"$contents"; then
     echo "$contents" | grep '/var/jb/usr/libexec/cydia/cydo$' || true

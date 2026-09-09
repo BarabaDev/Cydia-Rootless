@@ -1,6 +1,7 @@
 #include "CyteKit/UCPlatform.h"
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <strings.h>
 
@@ -220,6 +221,26 @@ static bool FixApplications() {
     }
 }
 
+// Remove only logs written by earlier Cydia releases. Directory-relative
+// operations do not follow either a Documents symlink or a log symlink.
+static void RemoveLegacyDiagnosticsFromDirectory(int directory) {
+    const char *names[] = {"Cydia_Rootless_Diagnostics.log", "Cydia_Rootless_Diagnostics.log.1"};
+    for (const char *name : names) {
+        struct stat info;
+        if (fstatat(directory, name, &info, AT_SYMLINK_NOFOLLOW) == 0 &&
+            S_ISREG(info.st_mode) && (info.st_uid == 501 || info.st_uid == 0))
+            (void) unlinkat(directory, name, 0);
+    }
+}
+
+static void RemoveLegacyDiagnostics() {
+    int directory(open("/var/mobile/Documents", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+    if (directory == -1)
+        return;
+    RemoveLegacyDiagnosticsFromDirectory(directory);
+    close(directory);
+}
+
 int main(int argc, const char *argv[]) {
     if (argc < 2)
         return 0;
@@ -227,6 +248,8 @@ int main(int argc, const char *argv[]) {
         UICache();
     if (strcmp(argv[1], "configure") != 0)
         return 0;
+
+    RemoveLegacyDiagnostics();
 
     UICache();
 

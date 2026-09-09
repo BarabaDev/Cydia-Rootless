@@ -526,3 +526,6 @@
 /* Commercial package status. */
 "Modern.Paid package" = "유료 패키지";
 "Modern.Checking purchase…" = "구매 상태 확인 중…";
+
+/* Updated purchase quote. */
+"Modern.The price changed. Review the updated price and confirm again." = "가격이 변경되었습니다. 변경된 가격을 확인한 후 다시 확정해 주세요.";

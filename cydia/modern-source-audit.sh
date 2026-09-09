@@ -5,15 +5,15 @@ cd "$(dirname "$0")"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 ok() { printf 'OK: %s\n' "$*"; }
 
-expected="1.1.25"
+expected="1.1.26"
 pinned="e4718f05d049c1a09fb9662cc3db2d4c5122defe"
 
-echo "== Cydia 1.1.25 clean rootless source audit =="
+echo "== Cydia 1.1.26 clean rootless source audit =="
 
 [[ "$(./version.sh)" == "$expected" ]] || fail "package version is not $expected"
 grep -Fxq "#define CYDIA_VERSION \"$expected\"" Version.h || fail "compiled version header differs"
-grep -A1 '<key>CFBundleShortVersionString</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.25</string>' || fail "app public version is not 1.1.25"
-grep -A1 '<key>CFBundleVersion</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.25</string>' || fail "app build number is not the final release version 1.1.25"
+grep -A1 '<key>CFBundleShortVersionString</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.26</string>' || fail "app public version is not 1.1.26"
+grep -A1 '<key>CFBundleVersion</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.26</string>' || fail "app build number is not the final release version 1.1.26"
 ! grep -E '^Depends:.*cydia-lproj' cydia.control >/dev/null || fail "obsolete separate translation dependency remains"
 grep -Fq 'Replaces: cydia-lproj (<= 1.1.22)' cydia.control || fail "safe merged-translation replacement rule is missing"
 grep -Fq 'Conflicts: cydia-lproj (<= 1.1.22)' cydia.control || fail "old translation package is not removed during migration"
@@ -25,6 +25,10 @@ localization_count="$(find MobileCydia.app -maxdepth 1 -type d -name '*.lproj' |
 [[ "$localization_count" == "${#locales[@]}" ]] || fail "expected 21 retained localizations, found $localization_count"
 for locale in "${locales[@]}"; do
     [[ -f "MobileCydia.app/$locale.lproj/Localizable.strings" ]] || fail "missing localization source: $locale"
+    interface_count="$(grep -c '^".*" = ' "MobileCydia.app/$locale.lproj/Localizable.strings")"
+    modern_count="$(grep -c '^"Modern[.]' "MobileCydia.app/$locale.lproj/Localizable.strings")"
+    [[ "$interface_count" == 527 && "$modern_count" == 304 ]] || fail "expected 527 interface and 304 native strings for $locale"
+    grep -Fq '"Modern.The price changed. Review the updated price and confirm again." = ' "MobileCydia.app/$locale.lproj/Localizable.strings" || fail "updated-price explanation is missing for $locale"
     [[ -f "MobileCydia.app/$locale.lproj/InfoPlist.strings" ]] || fail "missing localized Face ID purpose: $locale"
     grep -Fq '"NSFaceIDUsageDescription"' "MobileCydia.app/$locale.lproj/InfoPlist.strings" || fail "missing Face ID purpose key: $locale"
 done
@@ -128,8 +132,8 @@ ok "minimal pinned Bingner APT inputs are complete"
 # transport contract must already exist in the compiled http.cc itself.  Audit
 # the implementation rather than trusting a diagnostic string in the app.
 http_method="apt64/methods/http.cc"
-[[ "$(grep -Fc 'CFSTR("Cydia/1.1.25")' "$http_method")" -eq 1 ]] || \
-    fail "embedded HTTPS method does not contain exactly one Cydia/1.1.25 User-Agent"
+[[ "$(grep -Fc 'CFSTR("Cydia/1.1.26")' "$http_method")" -eq 1 ]] || \
+    fail "embedded HTTPS method does not contain exactly one Cydia/1.1.26 User-Agent"
 ! grep -Fq 'Telesphoreo APT-HTTP/1.0.592' "$http_method" || \
     fail "obsolete Telesphoreo package User-Agent remains in compiled source"
 for header in \
@@ -377,7 +381,7 @@ grep -Fq '[heroTitle setText:CYLocalize(@"Welcome to Cydia™")]' Cydia/ModernNa
 grep -Fq 'by Jay Freeman (saurik)' Cydia/ModernNativeViews.mm || fail "original author attribution is missing"
 ! grep -Fq 'heroSubtitle' Cydia/ModernNativeViews.mm || fail "removed Modern Rootless hero label remains"
 ! grep -Fq 'heroDetail' Cydia/ModernNativeViews.mm || fail "removed upper version label remains"
-grep -Fq '[footer setText:@"Cydia 1.1.25"]' Cydia/ModernNativeViews.mm || fail "Home footer version is missing"
+grep -Fq '[footer setText:@"Cydia 1.1.26"]' Cydia/ModernNativeViews.mm || fail "Home footer version is missing"
 ! grep -Fq 'Rootless edition by BarabaDev' Cydia/ModernNativeViews.mm || fail "removed footer credit remains"
 grep -Fq 'CYM3DestinationButton(@"Cydia", @"f"' Cydia/ModernNativeViews.mm || fail "Facebook destination is missing"
 grep -Fq 'CYM3DestinationButton(@"saurik", @"𝕏"' Cydia/ModernNativeViews.mm || fail "saurik social destination is missing"
@@ -397,10 +401,33 @@ grep -Fq 'CYRepositoryPackageInfo(' Cydia/RepositoryAccounts.mm || fail "commerc
 grep -Fq 'LAPolicyDeviceOwnerAuthentication' Cydia/RepositoryAccounts.mm || fail "purchase does not require device authentication"
 grep -Fq 'forKey:@"payment_secret"' Cydia/RepositoryAccounts.mm || fail "purchase request omits the Sileo payment secret"
 grep -Fq 'CYRepositoryPurchaseActionRequired' Cydia/RepositoryAccounts.mm || fail "purchase action-required status handling is missing"
-grep -Fq 'buyButtonClicked' MobileCydia.mm || fail "native Buy action is not wired into Package Details"
+grep -Fq '[self confirmPurchaseForPackage:package_];' MobileCydia.mm || fail "native Buy action lacks explicit purchase confirmation"
+grep -Fq '[self buyPackageWithConfirmedPrice:confirmedPrice];' MobileCydia.mm || fail "confirmed purchase does not preserve the displayed quote"
+grep -Fq '![price isEqualToString:confirmedPrice]' MobileCydia.mm || fail "purchase preflight does not reject a changed price"
+grep -Fq 'CYLocalize(@"The price changed. Review the updated price and confirm again.")' MobileCydia.mm || fail "changed price has no localized explanation"
 grep -Fq 'CYRepositoryPurchase(' MobileCydia.mm || fail "in-app purchase is not integrated into Package Details"
 grep -Fq 'ASWebAuthenticationPresentationContextProviding' MobileCydia.mm || fail "purchase action web-authentication presentation is missing"
 grep -Fq 'completePurchaseAndInstall' MobileCydia.mm || fail "a completed purchase does not continue to installation"
+# These source contracts complement the private offline lifecycle fixtures;
+# they do not simulate account navigation or authorize a purchase.
+package_controller="$(sed -n '/@implementation CYPackageController/,/^@end/p' MobileCydia.mm)"
+commercial_render="$(sed -n '/^- (void) renderCommercialPurchaseAction {/,/^}/p' <<<"$package_controller")"
+commercial_update="$(sed -n '/^- (void) updateCommercialPurchaseAction:(BOOL)force {/,/^}/p' <<<"$package_controller")"
+grep -Fq 'BOOL primaryInstall([package_ uninstalled] && [package_ mode] == nil);' <<<"$commercial_render" || fail "paid primary action still depends on available version count"
+grep -Fq 'setAccountNotice:CYLocalize(@"Manage sign-ins and explore your purchases.")' <<<"$commercial_render" || fail "paid account guidance is not persistent"
+[[ "$(grep -Fc 'setAccountNotice:' <<<"$commercial_render")" == 1 ]] || fail "paid state rendering inserts transient account notices"
+grep -Fq '[modernDetail_ setActionStatusDetail:detail];' <<<"$commercial_render" || fail "paid status is not confined to the action caption"
+grep -Fq 'CYLocalize(@"Try Again")' <<<"$commercial_render" || fail "paid retry action lacks its translated label"
+! grep -Fq 'CYLocalize(@"Retry")' <<<"$package_controller" || fail "untranslated paid retry label remains"
+grep -Fq 'purchaseAccountRevision_ != revision' <<<"$commercial_update" || fail "paid state does not invalidate an old account revision"
+grep -Fq 'era != purchaseEra_ || ![purchaseIdentity_ isEqual:identity]' <<<"$commercial_update" || fail "stale package-info completion is not rejected"
+grep -Fq 'revision != CYRepositoryAccountStateRevision()' <<<"$commercial_update" || fail "package-info completion ignores an account change"
+grep -Fq 'CYRepositoryPackageInfoSnapshot(repositoryURL, packageID, UniqueID_, model)' <<<"$commercial_update" || fail "paid display does not reuse bounded account snapshots"
+grep -Fq 'purchaseAccess_ == CYCommercialPackageAccessRetry ? 5.0 : 30.0' <<<"$commercial_update" || fail "paid retry and success display lifetimes changed"
+grep -Fq '[self updateCommercialPurchaseAction:NO];' <<<"$(sed -n '/^- (void) viewWillAppear:(BOOL)animated {/,/^}/p' <<<"$package_controller")" || fail "paid state is not rechecked on every appearance"
+grep -Fq 'name:CYRepositoryAccountStateDidChangeNotification object:nil' <<<"$package_controller" || fail "paid Details does not observe account changes"
+! grep -Fq 'returningFromRepositoryAccount_' <<<"$package_controller" || fail "cancelled interactive Back can consume a one-shot account refresh flag"
+ok "paid state rendering, persistent account guidance and revision-aware refresh contracts"
 grep -Fq 'CYStoreSourceDisplayName' MobileCydia.mm || fail "repository display-name persistence (Sileo parity) is missing"
 grep -Fq 'CYRememberedSourceDisplayName' MobileCydia.mm || fail "Sources list can regress to a bare hostname after refresh"
 # Sources list must not flicker: repository icons come from the shared
@@ -538,7 +565,7 @@ grep -Fq 'final visible package state reloaded after modal dismissal' MobileCydi
 grep -Fq 'CYExternalSourceFromCydiaURL' MobileCydia.mm || fail "external repository buttons are not decoded natively"
 grep -Fq 'showAddSourcePromptWithURL:' MobileCydia.mm || fail "external repository URL is not prefilled in the Add Source confirmation"
 grep -Fq 'CydiaManagedEquivalentExists' Sources.mm || fail "Cydia-managed equivalent sources can still be duplicated"
-grep -Fq 'reason=equivalent-managed-source' Sources.mm || fail "managed source deduplication is not diagnosable"
+grep -Fq 'reason=equivalent-managed-source' Sources.mm || fail "managed source deduplication branch marker is missing"
 # Sileo <-> Cydia source interoperability and duplicate protection. A source
 # added in Sileo/Zebra must be seen by Cydia (shared APT read of both .list and
 # DEB822 .sources), a source added in Cydia must be seen by them (atomic publish
@@ -548,7 +575,7 @@ grep -Fq 'ReadMainList()' MobileCydia.mm || fail "Cydia no longer reads the shar
 grep -Fq 'bool deb822(name.size() >= 8' Sources.mm || fail "Cydia stops recognizing DEB822 .sources files written by Sileo"
 grep -Fq 'CydiaSharedSourceEntries' Sources.mm || fail "shared cross-manager source scan is missing"
 grep -Fq 'CydiaExternalEquivalentExists' Sources.mm || fail "a repo already present in an external (Sileo) list can be duplicated by Cydia"
-grep -Fq 'reason=equivalent-external-source' Sources.mm || fail "external source deduplication is not diagnosable"
+grep -Fq 'reason=equivalent-external-source' Sources.mm || fail "external source deduplication branch marker is missing"
 grep -Fq 'rename(CYDIA_SOURCES_TEMP, CYDIA_SOURCES_DEST)' cydo.cpp || fail "Cydia-managed sources are not atomically published to the shared APT directory"
 grep -Fq 'sources.list.d/cydia-added.list' postrm || fail "purge leaves the Cydia-managed shared source file behind"
 ! grep -Fq 'sileo.sources' postrm || fail "uninstall must never touch Sileo-owned source files"
@@ -764,8 +791,8 @@ grep -Fq 'RetiredLegacyWebViews_' CyteKit/WebViewController.mm || fail "iOS 17 W
 grep -Fq 'CYRetireLegacyWebView(webview_)' CyteKit/WebViewController.mm || fail "legacy web views bypass safe retirement"
 grep -Fq 'if ([self isViewLoaded])' CyteKit/WebViewController.mm || fail "controller deallocation can bypass web view retirement"
 grep -Fq '[self setView:nil]' CyteKit/WebViewController.mm || fail "controller does not route teardown through releaseSubviews"
-grep -Fq 'reason=ios17-webkitlegacy-timer-teardown' CyteKit/WebViewController.mm || fail "WebKitLegacy crash workaround is not diagnosable"
-grep -Fq 'action=skipped surface=%@ reason=native-surface-ios17-timer-safety' MobileCydia.mm || fail "native WebKit-skip diagnostic is missing"
+grep -Fq 'reason=ios17-webkitlegacy-timer-teardown' CyteKit/WebViewController.mm || fail "WebKitLegacy retirement branch marker is missing"
+grep -Fq 'action=skipped surface=%@ reason=native-surface-ios17-timer-safety' MobileCydia.mm || fail "native WebKit-skip branch marker is missing"
 for surface in confirmation progress package-details; do
     grep -Fq "CYModernNativeControllerRoot(@\"$surface\")" MobileCydia.mm || \
         fail "$surface still constructs a hidden WebKitLegacy page"
@@ -778,6 +805,27 @@ printf '%s\n' "$dispatch_body" | grep -Fq 'if (webview_ == nil)' || fail "native
 printf '%s\n' "$dispatch_body" | grep -Fq '[webview_ dispatchEvent:event]' || fail "legacy WebView lifecycle dispatch no longer reaches the retained WebView"
 ! printf '%s\n' "$dispatch_body" | grep -Fq '[[self webView] dispatchEvent:event]' || fail "native root UIView can still receive the legacy dispatchEvent selector"
 ok "iOS 17 WebKitLegacy teardown guard and WebKit-free package transaction path"
+
+diagnostic_name='Cydia_Rootless_Diagnostics.log'
+while IFS= read -r source_file; do
+    [[ "$source_file" == './postinst.mm' ]] && continue
+    ! grep -Fq "$diagnostic_name" "$source_file" || fail "runtime diagnostic file remains in $source_file"
+done < <(find . -type f \( -name '*.h' -o -name '*.hpp' -o -name '*.m' -o -name '*.mm' -o -name '*.c' -o -name '*.cpp' \))
+for sink in CyteKit/RootlessDiagnostics.h cydo.cpp; do
+    sink_body="$(sed -n '/static inline void .*RootlessDiag(.*{/,/^}/p' "$sink")"
+    [[ "$(printf '%s\n' "$sink_body" | wc -l | tr -d ' ')" == 4 ]] || fail "diagnostic sink is no longer an empty function: $sink"
+    printf '%s\n' "$sink_body" | grep -Fq '(void) component;' || fail "diagnostic component handling changed: $sink"
+    printf '%s\n' "$sink_body" | grep -Fq '(void) format;' || fail "diagnostic format handling changed: $sink"
+done
+! grep -Eq 'CYRootlessUncaughtExceptionHandler|NSSetUncaughtExceptionHandler' MobileCydia.mm || fail "removed diagnostic exception hook remains"
+grep -Fq 'static inline NSString *CYRootlessDiagnosticsText' CyteKit/RootlessDiagnostics.h || fail "visible error sanitization is missing"
+grep -Fq 'static inline NSString *CYRootlessDiagnosticsURL' CyteKit/RootlessDiagnostics.h || fail "visible URL sanitization is missing"
+grep -Fq 'const char *names[] = {"Cydia_Rootless_Diagnostics.log", "Cydia_Rootless_Diagnostics.log.1"};' postinst.mm || fail "legacy diagnostic cleanup scope changed"
+grep -Fq 'O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC' postinst.mm || fail "legacy diagnostic cleanup follows Documents symlinks"
+grep -Fq 'fstatat(directory, name, &info, AT_SYMLINK_NOFOLLOW)' postinst.mm || fail "legacy diagnostic cleanup follows file symlinks"
+grep -Fq 'S_ISREG(info.st_mode) && (info.st_uid == 501 || info.st_uid == 0)' postinst.mm || fail "legacy diagnostic cleanup does not restrict type and owner"
+grep -Fq '(void) unlinkat(directory, name, 0);' postinst.mm || fail "legacy diagnostic cleanup is not directory-relative"
+ok "runtime diagnostic file and mail attachment removed; narrow legacy cleanup and error sanitizers retained"
 
 unused=(
     makefile.mac prepare-mac.sh source-preflight-mac.sh verify-package-mac.sh

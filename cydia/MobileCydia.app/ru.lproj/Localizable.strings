@@ -526,3 +526,6 @@
 /* Commercial package status. */
 "Modern.Paid package" = "Платный пакет";
 "Modern.Checking purchase…" = "Проверка статуса покупки…";
+
+/* Updated purchase quote. */
+"Modern.The price changed. Review the updated price and confirm again." = "Цена изменилась. Проверьте обновлённую цену и подтвердите ещё раз.";

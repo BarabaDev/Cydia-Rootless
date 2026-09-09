@@ -3,7 +3,7 @@ Priority: required
 Section: Packaging
 Maintainer: BarabaDev
 Architecture: iphoneos-arm64
-Version: 1.1.25
+Version: 1.1.26
 Replaces: cydia-lproj (<= 1.1.22), bigboss, bigbossbetarepo, com.sosiphone.addcydia, cydia-sources, ispazio.net, modmyifone, saurik, ste, yellowsn0w.com, zodttd
 Depends: apt, gpgv, darwintools, debianutils, dpkg (>= 1.19.1), libgnutls30, sed, shell-cmds, system-cmds, uikittools (>= 1.1.14), bzip2, gzip, lz4, zstd, xz-utils | xz
 Conflicts: cydia-lproj (<= 1.1.22), bigboss, bigbossbetarepo, com.sosiphone.addcydia, cydia-sources, ispazio.net, modmyifone, ste, yellowsn0w.com, zodttd

@@ -526,3 +526,6 @@
 /* Commercial package status. */
 "Modern.Paid package" = "有料パッケージ";
 "Modern.Checking purchase…" = "購入状況を確認中…";
+
+/* Updated purchase quote. */
+"Modern.The price changed. Review the updated price and confirm again." = "価格が変更されました。更新された価格を確認して、もう一度確定してください。";

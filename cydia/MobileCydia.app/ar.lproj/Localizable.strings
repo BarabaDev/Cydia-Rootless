@@ -527,3 +527,6 @@
 /* Commercial package status. */
 "Modern.Paid package" = "حزمة مدفوعة";
 "Modern.Checking purchase…" = "جارٍ التحقق من حالة الشراء…";
+
+/* Updated purchase quote. */
+"Modern.The price changed. Review the updated price and confirm again." = "تغيّر السعر. راجع السعر المحدّث وأكّد مرة أخرى.";

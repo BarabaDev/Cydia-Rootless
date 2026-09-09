@@ -527,3 +527,6 @@
 /* Commercial package status. */
 "Modern.Paid package" = "Gói trả phí";
 "Modern.Checking purchase…" = "Đang kiểm tra tình trạng mua hàng…";
+
+/* Updated purchase quote. */
+"Modern.The price changed. Review the updated price and confirm again." = "Giá đã thay đổi. Hãy kiểm tra giá cập nhật và xác nhận lại.";

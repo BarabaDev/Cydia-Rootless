@@ -526,3 +526,6 @@
 /* Commercial package status. */
 "Modern.Paid package" = "Kostenpflichtiges Paket";
 "Modern.Checking purchase…" = "Kaufstatus wird geprüft…";
+
+/* Updated purchase quote. */
+"Modern.The price changed. Review the updated price and confirm again." = "Der Preis hat sich geändert. Prüfe den aktualisierten Preis und bestätige erneut.";

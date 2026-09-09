@@ -1,4 +1,4 @@
-/* Cydia 1.1.25 Rootless - complete native iOS 15+ transaction UI */
+/* Cydia 1.1.26 Rootless - complete native iOS 15+ transaction UI */
 
 #include "Cydia/ModernLocalization.h"
 #include "Cydia/ModernNativeViews.h"
@@ -831,6 +831,7 @@ static UIButton *CYM3DestinationButton(NSString *title, NSString *glyph, UIColor
 - (NSString *) featuredImageURL;
 - (UIImage *) loadedBannerImage;
 - (void) adoptLoadedBannerImage:(UIImage *)image;
+- (void) updateFeaturedPackage:(NSDictionary *)package;
 - (id) initWithPackage:(NSDictionary *)package palette:(NSUInteger)palette;
 - (void) featuredBannerDidLoad:(NSNotification *)notification;
 @end
@@ -1171,6 +1172,15 @@ void CYPrewarmFeaturedBannerArtwork(NSArray *packages, CGFloat scale) {
 
 - (NSString *) featuredImageURL { return imageURL_; }
 - (UIImage *) loadedBannerImage { return [bannerImage_ image]; }
+- (void) updateFeaturedPackage:(NSDictionary *)package {
+    // Reused cards keep their image and layer; only their presentation metadata
+    // and cache-only launch permission change.
+    launchCacheOnly_ = [[package objectForKey:@"launchCacheOnly"] boolValue];
+    [self setAccessibilityLabel:[NSString stringWithFormat:CYLocalize(@"%@. Featured package from %@"),
+        [package objectForKey:@"name"] ?: CYLocalize(@"Package"),
+        [package objectForKey:@"repository"] ?: @""]];
+    [self loadBannerIfNeeded];
+}
 - (void) adoptLoadedBannerImage:(UIImage *)image {
     if (image == nil || [bannerImage_ image] != nil) return;
     [UIView performWithoutAnimation:^{ [bannerImage_ setImage:image]; }];
@@ -1500,6 +1510,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
 - (void) stopFeaturedTicker;
 - (NSDictionary *) featuredPosition;
 - (void) restoreFeaturedPosition:(NSDictionary *)position;
+- (void) ensureFeaturedCoverageWithReusableCards:(NSMutableDictionary *)reusable;
 @end
 
 @implementation CydiaModernHomeView
@@ -1602,6 +1613,9 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
 
         featuredScroll_ = [[[UIScrollView alloc] init] autorelease];
         [featuredScroll_ setTranslatesAutoresizingMaskIntoConstraints:NO];
+        // Carousel phase uses forward content coordinates. Keep this artwork
+        // strip in that order so an RTL 6-to-60 handoff retains the visible card.
+        [featuredScroll_ setSemanticContentAttribute:UISemanticContentAttributeForceLeftToRight];
         [featuredScroll_ setDelegate:self];
         [featuredScroll_ setShowsHorizontalScrollIndicator:NO];
         [featuredScroll_ setBounces:NO];
@@ -1615,13 +1629,14 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
 
         featuredStack_ = [[[UIStackView alloc] init] autorelease];
         [featuredStack_ setTranslatesAutoresizingMaskIntoConstraints:NO];
+        [featuredStack_ setSemanticContentAttribute:UISemanticContentAttributeForceLeftToRight];
         [featuredStack_ setAxis:UILayoutConstraintAxisHorizontal];
         [featuredStack_ setAlignment:UIStackViewAlignmentFill];
         [featuredStack_ setSpacing:12.0f];
         [featuredScroll_ addSubview:featuredStack_];
 
         UILabel *footer(CYM3Label(UIFontTextStyleFootnote, [UIColor secondaryLabelColor], 1));
-        [footer setText:@"Cydia 1.1.25"];
+        [footer setText:@"Cydia 1.1.26"];
         homeVersion_ = footer;
         [footer setTextAlignment:NSTextAlignmentCenter];
 
@@ -1843,11 +1858,18 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
     [self stopFeaturedTicker];
     featuredRebuilding_ = YES;
     NSArray *oldCards([[featuredStack_ arrangedSubviews] copy]);
-    for (UIView *view in oldCards) {
+    NSMutableDictionary *reusable([NSMutableDictionary dictionary]);
+    for (CYM3FeaturedPackageButton *view in oldCards) {
+        NSArray *key(@[[view accessibilityIdentifier] ?: @"", [view featuredImageURL] ?: @""]);
+        NSMutableArray *cards([reusable objectForKey:key]);
+        if (cards == nil) {
+            cards = [NSMutableArray array];
+            [reusable setObject:cards forKey:key];
+        }
+        [cards addObject:view];
         [featuredStack_ removeArrangedSubview:view];
         [view removeFromSuperview];
     }
-    [oldCards release];
 
     NSArray *snapshot([packages copy]);
     [featuredRecords_ release];
@@ -1858,6 +1880,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
     if (!available) {
         featuredCycleWidth_ = 0.0f;
         featuredRebuilding_ = NO;
+        [oldCards release];
         return;
     }
 
@@ -1865,7 +1888,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
     // tweak remains visible instead of being replaced by an enlarged icon.
     featuredCardWidth_ = 263.0f;
     featuredCycleWidth_ = count * featuredCardWidth_ + count * [featuredStack_ spacing];
-    [self ensureFeaturedCoverage];
+    [self ensureFeaturedCoverageWithReusableCards:reusable];
     [UIView performWithoutAnimation:^{
         [self layoutIfNeeded];
         [featuredScroll_ layoutIfNeeded];
@@ -1873,6 +1896,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
         [self restoreFeaturedPosition:position];
     }];
     featuredRebuilding_ = NO;
+    [oldCards release];
     if (featuredTravelVelocity_ == 0.0f)
         featuredTravelVelocity_ = 14.0f;
     [self startFeaturedTicker];
@@ -1931,6 +1955,10 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
 }
 
 - (void) ensureFeaturedCoverage {
+    [self ensureFeaturedCoverageWithReusableCards:nil];
+}
+
+- (void) ensureFeaturedCoverageWithReusableCards:(NSMutableDictionary *)reusable {
     NSUInteger count([featuredRecords_ count]);
     if (count == 0 || featuredCycleWidth_ <= 0.0f)
         return;
@@ -1942,13 +1970,22 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
     for (NSUInteger copy(existing); copy < sequences; ++copy) {
         for (NSUInteger index(0); index != count; ++index) {
             NSDictionary *package([featuredRecords_ objectAtIndex:index]);
-            CYM3FeaturedPackageButton *card([[[CYM3FeaturedPackageButton alloc]
-                initWithPackage:package palette:index] autorelease]);
+            NSArray *key(@[[package objectForKey:@"identifier"] ?: @"", [package objectForKey:@"imageURL"] ?: @""]);
+            NSMutableArray *cards([reusable objectForKey:key]);
+            CYM3FeaturedPackageButton *card(nil);
+            if ([cards count] != 0) {
+                card = [[[cards objectAtIndex:0] retain] autorelease];
+                [cards removeObjectAtIndex:0];
+                [card updateFeaturedPackage:package];
+            } else {
+                card = [[[CYM3FeaturedPackageButton alloc] initWithPackage:package palette:index] autorelease];
+                [[card widthAnchor] constraintEqualToConstant:featuredCardWidth_].active = YES;
+            }
             [card setTag:200];
+            [card removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
             if (actionTarget_ != nil && actionSelector_ != NULL)
                 [card addTarget:actionTarget_ action:actionSelector_ forControlEvents:UIControlEventTouchUpInside];
             [featuredStack_ addArrangedSubview:card];
-            [[card widthAnchor] constraintEqualToConstant:featuredCardWidth_].active = YES;
         }
     }
 }
@@ -3526,6 +3563,8 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
     UIView *stateTile_;
     UILabel *stateTitle_;
     UILabel *stateDetail_;
+    NSLayoutConstraint *stateDetailMinimumHeight_;
+    BOOL commercial_;
     UIButton *action_;
     UIStackView *actionContent_;
     NSLayoutConstraint *actionWidth_;
@@ -3544,6 +3583,7 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
 
 - (void) dealloc {
     [actionWidth_ release];
+    [stateDetailMinimumHeight_ release];
     [identityWidth_ release];
     [commercialBadge_ release];
     [accountNoticeCard_ release];
@@ -3630,6 +3670,7 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
         stateTitle_ = CYM3Label(UIFontTextStyleHeadline, [UIColor labelColor], 0);
         stateDetail_ = CYM3Label(UIFontTextStyleCaption1, [UIColor secondaryLabelColor], 0);
         [stateDetail_ setLineBreakMode:NSLineBreakByTruncatingMiddle];
+        stateDetailMinimumHeight_ = [[[stateDetail_ heightAnchor] constraintGreaterThanOrEqualToConstant:0.0f] retain];
         UIStackView *stateLabels([[[UIStackView alloc] initWithArrangedSubviews:[NSArray arrayWithObjects:stateTitle_, stateDetail_, nil]] autorelease]);
         [stateLabels setAxis:UILayoutConstraintAxisVertical];
         [stateLabels setSpacing:2.0f];
@@ -3769,6 +3810,9 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
 
 - (void) updateAccessibleLayout {
     BOOL large(UIContentSizeCategoryIsAccessibilityCategory([[self traitCollection] preferredContentSizeCategory]));
+    UIFont *caption([UIFont preferredFontForTextStyle:UIFontTextStyleCaption1 compatibleWithTraitCollection:[self traitCollection]]);
+    [stateDetailMinimumHeight_ setConstant:ceil([caption lineHeight] * 2.0f)];
+    [stateDetailMinimumHeight_ setActive:commercial_ && !large];
     [identityWidth_ setActive:large];
     [identityRow_ setAxis:large ? UILayoutConstraintAxisVertical : UILayoutConstraintAxisHorizontal];
     [actionWidth_ setActive:!large];
@@ -3849,6 +3893,7 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
     [stateIcon_ setTintColor:stateColor];
     [stateTile_ setBackgroundColor:[stateColor colorWithAlphaComponent:0.13f]];
     [stateTitle_ setText:installed ? CYLocalize(@"Installed") : CYLocalize(@"Available")];
+    [stateDetail_ setLineBreakMode:NSLineBreakByTruncatingMiddle];
     [stateDetail_ setText:installed ? installedVersion : CYLocalize(@"Ready to review")];
 
     [repositoryValue_ setText:[repository length] == 0 ? CYLocalize(@"Local") : repository];
@@ -3859,6 +3904,8 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
 }
 
 - (void) setCommercial:(BOOL)commercial {
+    commercial_ = commercial;
+    [self updateAccessibleLayout];
     if (commercial) {
         if ([commercialBadge_ superview] == nil)
             [identityStack_ insertArrangedSubview:commercialBadge_ atIndex:2];
@@ -3869,7 +3916,8 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
 }
 
 - (void) setAccountNotice:(NSString *)notice target:(id)target action:(SEL)action {
-    [accountNotice_ setText:notice];
+    if ([accountNotice_ text] != notice && (notice == nil || ![[accountNotice_ text] isEqualToString:notice]))
+        [accountNotice_ setText:notice];
     [accountNoticeButton_ removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
     BOOL actionable(target != nil && action != NULL);
     [accountNoticeButton_ setEnabled:actionable];
@@ -3888,6 +3936,12 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
     [action_ setEnabled:enabled];
 }
 
+- (void) setActionStatusDetail:(NSString *)detail {
+    [stateDetail_ setLineBreakMode:NSLineBreakByWordWrapping];
+    if ([stateDetail_ text] == detail || (detail != nil && [[stateDetail_ text] isEqualToString:detail])) return;
+    [stateDetail_ setText:detail];
+}
+
 - (UIView *) actionSourceView { return action_; }
 
 - (void) updateHeroIcon:(UIImage *)icon {
@@ -3900,7 +3954,13 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
 
 - (void) setActionTitle:(NSString *)title destructive:(BOOL)destructive target:(id)target action:(SEL)action {
     [action_ setHidden:[title length] == 0];
-    [action_ setTitle:title forState:UIControlStateNormal];
+    if ([action_ titleForState:UIControlStateNormal] != title &&
+        (title == nil || ![[action_ titleForState:UIControlStateNormal] isEqualToString:title])) {
+        [UIView performWithoutAnimation:^{
+            [action_ setTitle:title forState:UIControlStateNormal];
+            [action_ layoutIfNeeded];
+        }];
+    }
     // Keep the action word optically and mathematically centred. Reserving
     // space for a leading symbol shifts short titles such as Modify/Install.
     [action_ setImage:nil forState:UIControlStateNormal];

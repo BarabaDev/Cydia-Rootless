@@ -16,8 +16,6 @@
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
-#include <cstdarg>
-#include <ctime>
 
 #include <errno.h>
 #include <sysexits.h>
@@ -42,51 +40,10 @@ bool _itv;
 #define CYDIA_SOURCES_LEGACY "/var/jb/etc/apt/sources.list.d/cydia.list"
 
 
-#define ROOTLESS_DIAGNOSTICS_LOG "/var/mobile/Documents/Cydia_Rootless_Diagnostics.log"
-#define ROOTLESS_DIAGNOSTICS_OLD "/var/mobile/Documents/Cydia_Rootless_Diagnostics.log.1"
-#define ROOTLESS_DIAGNOSTICS_MAX (2 * 1024 * 1024)
-
-static void RootlessDiag(const char *component, const char *format, ...) {
-    struct stat info;
-    if (stat(ROOTLESS_DIAGNOSTICS_LOG, &info) == 0 && info.st_size >= ROOTLESS_DIAGNOSTICS_MAX) {
-        unlink(ROOTLESS_DIAGNOSTICS_OLD);
-        rename(ROOTLESS_DIAGNOSTICS_LOG, ROOTLESS_DIAGNOSTICS_OLD);
-    }
-
-    int fd = open(ROOTLESS_DIAGNOSTICS_LOG, O_WRONLY | O_CREAT | O_APPEND, 0644);
-    if (fd < 0)
-        return;
-
-    // cydo normally writes as root. If it creates the shared log
-    // first, root:wheel 0644 blocks the mobile Cydia process from appending
-    // its SESSION/SOURCE/APT records. Hand ownership back to mobile while
-    // retaining root write access through privilege.
-    if (geteuid() == 0) {
-        (void) fchown(fd, 501, 501);
-        (void) fchmod(fd, 0644);
-    }
-
-    char message[1024];
-    va_list args;
-    va_start(args, format);
-    vsnprintf(message, sizeof(message), format, args);
-    va_end(args);
-
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    struct tm tm;
-    gmtime_r(&tv.tv_sec, &tm);
-    char date[48];
-    strftime(date, sizeof(date), "%Y-%m-%d %H:%M:%S", &tm);
-    char stamp[64];
-    snprintf(stamp, sizeof(stamp), "%s.%03d +0000", date, (int) (tv.tv_usec / 1000));
-
-    char line[1500];
-    int size = snprintf(line, sizeof(line), "%s [%s] pid=%d ppid=%d %s\n",
-        stamp, component != NULL ? component : "CYDO", getpid(), getppid(), message);
-    if (size > 0)
-        (void) write(fd, line, static_cast<size_t>(size < (int) sizeof(line) ? size : (int) sizeof(line)));
-    close(fd);
+// Keep call-site evaluation without creating or appending diagnostic files.
+static inline void RootlessDiag(const char *component, const char *format, ...) {
+    (void) component;
+    (void) format;
 }
 
 static bool SameFile(const char *left, const char *right) {
