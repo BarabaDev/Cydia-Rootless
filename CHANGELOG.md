@@ -1,3 +1,16 @@
+# Cydia 1.1.27
+
+Repository actions and scrolling update by BarabaDev on **9 September 2026**.
+
+- Swipe any source to refresh that repository individually. Remove is available only for sources managed by Cydia; saved actions recheck source identity and ownership before removal.
+- Individual refreshes use the existing serialized refresh flow, progress bar and completion feedback. They preserve other repositories' usable indexes and do not mark all repositories as freshly updated. Normal malformed-index repair remains active when the database reloads.
+- Shared rootless APT sources remain visible across package managers. Cydia publishes only its own source file and does not adopt repositories from regular or foreign legacy source files.
+- Package lists offer Remove for installed packages, Install for available free packages, and Details with a payment symbol for paid packages. Paid-package actions use the existing sign-in and purchase flow; installation and removal still require Review. Full-swipe execution is disabled.
+- Package rows reuse metadata from the current database instead of rebuilding a package object on every display. Cached icon reads and image preparation run in the background, images are decoded at a bounded display size, and outdated image callbacks cannot overwrite reused rows.
+- Manage Account displays a stable, repository-specific sign-in indicator independently from purchase ownership. The new status labels are included in all 21 existing localizations.
+
+The package version is `1.1.27` and the architecture is `iphoneos-arm64`. Build, simulator and offline regression checks do not replace purchase, installation, scrolling and restart validation on a rootless device.
+
 # Cydia 1.1.26
 
 Paid-package and interface stability update by BarabaDev on **9 September 2026**.

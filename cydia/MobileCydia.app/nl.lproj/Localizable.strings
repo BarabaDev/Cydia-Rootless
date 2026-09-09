@@ -529,3 +529,7 @@
 
 /* Updated purchase quote. */
 "Modern.The price changed. Review the updated price and confirm again." = "De prijs is gewijzigd. Controleer de bijgewerkte prijs en bevestig opnieuw.";
+
+/* Repository account state, independent of package ownership. */
+"Modern.Not signed in" = "Niet aangemeld";
+"Modern.Checking…" = "Controleren…";

@@ -529,3 +529,7 @@
 
 /* Updated purchase quote. */
 "Modern.The price changed. Review the updated price and confirm again." = "Η τιμή άλλαξε. Ελέγξτε την ενημερωμένη τιμή και επιβεβαιώστε ξανά.";
+
+/* Repository account state, independent of package ownership. */
+"Modern.Not signed in" = "Δεν έχει γίνει σύνδεση";
+"Modern.Checking…" = "Γίνεται έλεγχος…";

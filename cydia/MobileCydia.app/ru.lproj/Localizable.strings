@@ -529,3 +529,7 @@
 
 /* Updated purchase quote. */
 "Modern.The price changed. Review the updated price and confirm again." = "Цена изменилась. Проверьте обновлённую цену и подтвердите ещё раз.";
+
+/* Repository account state, independent of package ownership. */
+"Modern.Not signed in" = "Вход не выполнен";
+"Modern.Checking…" = "Проверка…";

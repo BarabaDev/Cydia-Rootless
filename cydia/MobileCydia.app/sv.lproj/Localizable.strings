@@ -529,3 +529,7 @@
 
 /* Updated purchase quote. */
 "Modern.The price changed. Review the updated price and confirm again." = "Priset har ändrats. Kontrollera det uppdaterade priset och bekräfta igen.";
+
+/* Repository account state, independent of package ownership. */
+"Modern.Not signed in" = "Inte inloggad";
+"Modern.Checking…" = "Kontrollerar…";

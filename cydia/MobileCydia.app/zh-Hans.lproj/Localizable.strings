@@ -529,3 +529,7 @@
 
 /* Updated purchase quote. */
 "Modern.The price changed. Review the updated price and confirm again." = "价格已更改。请查看更新后的价格并再次确认。";
+
+/* Repository account state, independent of package ownership. */
+"Modern.Not signed in" = "未登录";
+"Modern.Checking…" = "正在检查…";

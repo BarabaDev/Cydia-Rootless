@@ -5,15 +5,15 @@ cd "$(dirname "$0")"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 ok() { printf 'OK: %s\n' "$*"; }
 
-expected="1.1.26"
+expected="1.1.27"
 pinned="e4718f05d049c1a09fb9662cc3db2d4c5122defe"
 
-echo "== Cydia 1.1.26 clean rootless source audit =="
+echo "== Cydia 1.1.27 clean rootless source audit =="
 
 [[ "$(./version.sh)" == "$expected" ]] || fail "package version is not $expected"
 grep -Fxq "#define CYDIA_VERSION \"$expected\"" Version.h || fail "compiled version header differs"
-grep -A1 '<key>CFBundleShortVersionString</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.26</string>' || fail "app public version is not 1.1.26"
-grep -A1 '<key>CFBundleVersion</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.26</string>' || fail "app build number is not the final release version 1.1.26"
+grep -A1 '<key>CFBundleShortVersionString</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.27</string>' || fail "app public version is not 1.1.27"
+grep -A1 '<key>CFBundleVersion</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.27</string>' || fail "app build number is not the final release version 1.1.27"
 ! grep -E '^Depends:.*cydia-lproj' cydia.control >/dev/null || fail "obsolete separate translation dependency remains"
 grep -Fq 'Replaces: cydia-lproj (<= 1.1.22)' cydia.control || fail "safe merged-translation replacement rule is missing"
 grep -Fq 'Conflicts: cydia-lproj (<= 1.1.22)' cydia.control || fail "old translation package is not removed during migration"
@@ -27,7 +27,7 @@ for locale in "${locales[@]}"; do
     [[ -f "MobileCydia.app/$locale.lproj/Localizable.strings" ]] || fail "missing localization source: $locale"
     interface_count="$(grep -c '^".*" = ' "MobileCydia.app/$locale.lproj/Localizable.strings")"
     modern_count="$(grep -c '^"Modern[.]' "MobileCydia.app/$locale.lproj/Localizable.strings")"
-    [[ "$interface_count" == 527 && "$modern_count" == 304 ]] || fail "expected 527 interface and 304 native strings for $locale"
+    [[ "$interface_count" == 529 && "$modern_count" == 306 ]] || fail "expected 529 interface and 306 native strings for $locale"
     grep -Fq '"Modern.The price changed. Review the updated price and confirm again." = ' "MobileCydia.app/$locale.lproj/Localizable.strings" || fail "updated-price explanation is missing for $locale"
     [[ -f "MobileCydia.app/$locale.lproj/InfoPlist.strings" ]] || fail "missing localized Face ID purpose: $locale"
     grep -Fq '"NSFaceIDUsageDescription"' "MobileCydia.app/$locale.lproj/InfoPlist.strings" || fail "missing Face ID purpose key: $locale"
@@ -132,8 +132,8 @@ ok "minimal pinned Bingner APT inputs are complete"
 # transport contract must already exist in the compiled http.cc itself.  Audit
 # the implementation rather than trusting a diagnostic string in the app.
 http_method="apt64/methods/http.cc"
-[[ "$(grep -Fc 'CFSTR("Cydia/1.1.26")' "$http_method")" -eq 1 ]] || \
-    fail "embedded HTTPS method does not contain exactly one Cydia/1.1.26 User-Agent"
+[[ "$(grep -Fc 'CFSTR("Cydia/1.1.27")' "$http_method")" -eq 1 ]] || \
+    fail "embedded HTTPS method does not contain exactly one Cydia/1.1.27 User-Agent"
 ! grep -Fq 'Telesphoreo APT-HTTP/1.0.592' "$http_method" || \
     fail "obsolete Telesphoreo package User-Agent remains in compiled source"
 for header in \
@@ -364,7 +364,7 @@ grep -Fq 'CydiaSourceSweep' CyteKit/ModernAppearance.mm || fail "Sources top ref
 grep -Fq 'single, non-redundant indicator' MobileCydia.mm || fail "redundant tab-bar refresh spinner was reintroduced"
 grep -Fq 'const CGFloat centerX(itemWidth * 1.5f)' MobileCydia.mm || fail "Sources spinner is not deterministically centered on the Sources tab"
 grep -Fq '@"checkmark.circle.fill"' MobileCydia.mm || fail "successful source refresh does not transition to a green checkmark"
-grep -Fq 'showSourceCompletionWithVerification:' MobileCydia.mm || fail "Sources completion status is not connected"
+grep -Fq 'showSourceCompletionWithResult:' MobileCydia.mm || fail "Sources completion status is not connected"
 grep -Fq 'reloadDataAfterSourceRefresh' MobileCydia.mm || fail "source refresh still uses the flashing full-screen reload path"
 grep -Fq 'fullScreenHUD=0' MobileCydia.mm || fail "source refresh in-place reload contract is missing"
 grep -Fq '_updateDataPreservingVisibleController' MobileCydia.mm || fail "source refresh still tears down the selected screen"
@@ -381,7 +381,7 @@ grep -Fq '[heroTitle setText:CYLocalize(@"Welcome to Cydia™")]' Cydia/ModernNa
 grep -Fq 'by Jay Freeman (saurik)' Cydia/ModernNativeViews.mm || fail "original author attribution is missing"
 ! grep -Fq 'heroSubtitle' Cydia/ModernNativeViews.mm || fail "removed Modern Rootless hero label remains"
 ! grep -Fq 'heroDetail' Cydia/ModernNativeViews.mm || fail "removed upper version label remains"
-grep -Fq '[footer setText:@"Cydia 1.1.26"]' Cydia/ModernNativeViews.mm || fail "Home footer version is missing"
+grep -Fq '[footer setText:@"Cydia 1.1.27"]' Cydia/ModernNativeViews.mm || fail "Home footer version is missing"
 ! grep -Fq 'Rootless edition by BarabaDev' Cydia/ModernNativeViews.mm || fail "removed footer credit remains"
 grep -Fq 'CYM3DestinationButton(@"Cydia", @"f"' Cydia/ModernNativeViews.mm || fail "Facebook destination is missing"
 grep -Fq 'CYM3DestinationButton(@"saurik", @"𝕏"' Cydia/ModernNativeViews.mm || fail "saurik social destination is missing"

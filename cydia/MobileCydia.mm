@@ -49,6 +49,7 @@
 #include <objc/runtime.h>
 
 #include <CoreGraphics/CoreGraphics.h>
+#include <ImageIO/ImageIO.h>
 #include <Foundation/Foundation.h>
 
 #if 0
@@ -935,6 +936,34 @@ static NSString *CYCanonicalRepositoryURI(NSString *uri) {
     return canonical.empty() ? nil : [NSString stringWithUTF8String:canonical.c_str()];
 }
 
+static void CYStoreSingleRepositoryRefreshState(NSString *uri, bool verified, bool usable,
+    bool exclusiveURI, NSDictionary *newIssues) {
+    NSString *canonical(CYCanonicalRepositoryURI(uri));
+    if (canonical == nil)
+        return;
+    NSMutableDictionary *state([NSMutableDictionary dictionaryWithContentsOfFile:CacheState_]);
+    if (state == nil)
+        state = [NSMutableDictionary dictionary];
+    id stored([state objectForKey:@"LastUpdateSourceIssues"]);
+    NSMutableDictionary *issues([stored isKindOfClass:[NSDictionary class]] ?
+        [NSMutableDictionary dictionaryWithDictionary:stored] : [NSMutableDictionary dictionary]);
+    // Issue storage is URI-based. A different suite at the same URI may still
+    // have a problem, so only a full refresh may clear that shared warning.
+    if (verified && exclusiveURI)
+        [issues removeObjectForKey:canonical];
+    id issue([newIssues objectForKey:canonical]);
+    if (issue != nil)
+        [issues setObject:issue forKey:canonical];
+    [state setObject:issues forKey:@"LastUpdateSourceIssues"];
+    if (!verified)
+        [state setObject:@NO forKey:@"LastUpdateVerified"];
+    if (!usable)
+        [state setObject:@NO forKey:@"LastUpdateUsable"];
+    NSUInteger warnings(MAX([[state objectForKey:@"LastUpdateWarnings"] unsignedIntegerValue], [issues count]));
+    [state setObject:@(warnings) forKey:@"LastUpdateWarnings"];
+    [state writeToFile:CacheState_ atomically:YES];
+}
+
 static NSString *CYRepositoryIssueCode(NSString *uri) {
     NSString *canonical(CYCanonicalRepositoryURI(uri));
     if (canonical == nil)
@@ -1285,6 +1314,7 @@ static NSString *CYExternalSourceFromCydiaURL(NSURL *url) {
 - (BOOL) hasRepositoryVerificationResult;
 - (BOOL) repositoriesVerified;
 - (bool) requestUpdate;
+- (bool) requestUpdateForSourceKey:(NSString *)sourceKey;
 - (void) distUpgrade;
 - (void) loadData;
 - (void) updateData;
@@ -1520,6 +1550,7 @@ enum CYPackageTransactionResult {
 - (void) update;
 
 - (bool) updateWithStatus:(CancelStatus &)status;
+- (bool) updateWithStatus:(CancelStatus &)status sourceKey:(NSString *)sourceKey;
 
 - (void) setDelegate:(NSObject<DatabaseDelegate> *)delegate;
 
@@ -2279,13 +2310,20 @@ static NSString *CYRememberedSourceDisplayName(NSString *key) {
 }
 
 - (void) _remove {
-    [Sources_ removeObjectForKey:[self key]];
+@synchronized (database_) {
+    NSString *key([self key]);
+    Source *current([database_ sourceWithKey:key]);
+    if (record_ == nil || [current record] != (NSMutableDictionary *) record_ || [Sources_ objectForKey:key] != (NSMutableDictionary *) record_)
+        return;
+    [Sources_ removeObjectForKey:key];
+}
 }
 
 - (bool) remove {
-    bool value(record_ != nil);
+    if (record_ == nil)
+        return false;
     [self performSelectorOnMainThread:@selector(_remove) withObject:nil waitUntilDone:NO];
-    return value;
+    return true;
 }
 
 - (NSDictionary *) record {
@@ -4227,12 +4265,18 @@ static NSInteger CYSearchPackageCompare(id left, id right, void *context) {
 // labels remain single-line where the list design requires truncation, while
 // their full line height is always available at accessibility text sizes.
 static CGFloat CYModernPackageRowHeight(BOOL summarized) {
-    CGFloat textHeight([[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline] lineHeight]);
-    if (!summarized)
-        textHeight += [[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1] lineHeight] +
-            [[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline] lineHeight] + 4.0f;
-    CGFloat contentHeight(MAX(46.0f, textHeight));
-    return ceil(MAX(summarized ? 66.0f : 86.0f, contentHeight + 20.0f));
+    static _H<NSString> category;
+    static CGFloat summaryHeight(0.0f), fullHeight(0.0f);
+    NSString *current([[UIApplication sharedApplication] preferredContentSizeCategory]);
+    if (fullHeight == 0.0f || ![category isEqualToString:current]) {
+        category = current;
+        CGFloat headline([[UIFont preferredFontForTextStyle:UIFontTextStyleHeadline] lineHeight]);
+        CGFloat detail(headline + [[UIFont preferredFontForTextStyle:UIFontTextStyleCaption1] lineHeight] +
+            [[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline] lineHeight] + 4.0f);
+        summaryHeight = ceil(MAX(66.0f, MAX(46.0f, headline) + 20.0f));
+        fullHeight = ceil(MAX(86.0f, MAX(46.0f, detail) + 20.0f));
+    }
+    return summarized ? summaryHeight : fullHeight;
 }
 
 static CGFloat CYModernSectionRowHeight(void) {
@@ -5780,6 +5824,10 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
 }
 
 - (bool) updateWithStatus:(CancelStatus &)status {
+    return [self updateWithStatus:status sourceKey:nil];
+}
+
+- (bool) updateWithStatus:(CancelStatus &)status sourceKey:(NSString *)sourceKey {
     NSString *title(UCLocalize("REFRESHING_DATA"));
     uint64_t diagnosticsStart(_timestamp);
     CYRootlessDiag(@"REFRESH", @"begin");
@@ -5787,14 +5835,38 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
     pkgSourceList list;
     if ([self popErrorWithTitle:title forReadList:list]) {
         CYRootlessDiag(@"REFRESH", @"end status=failed phase=read-sources durationMs=%llu", (unsigned long long) ((_timestamp - diagnosticsStart) / 1000));
-        CYStoreRepositoryVerificationState(false, false);
+        if (sourceKey == nil)
+            CYStoreRepositoryVerificationState(false, false);
         return false;
+    }
+
+    metaIndex *selected(NULL);
+    size_t matchingURIEntries(0);
+    if (sourceKey != nil) {
+        for (metaIndex *entry : list) {
+            NSString *key([NSString stringWithFormat:@"%s:%s:%s", entry->GetType(),
+                entry->GetURI().c_str(), entry->GetDist().c_str()]);
+            if ([key isEqualToString:sourceKey]) {
+                selected = entry;
+                break;
+            }
+        }
+        // The owner may have removed the source since the swipe opened.
+        // Never fall back to refreshing all repositories for a stale key.
+        if (selected == NULL)
+            return false;
+        for (metaIndex *entry : list)
+            if (CYSourceIdentity::CanonicalURI(entry->GetURI()) ==
+                CYSourceIdentity::CanonicalURI(selected->GetURI()))
+                ++matchingURIEntries;
     }
 
     size_t sourceCount(0);
     std::set<std::string> sourceRoots;
     size_t externalCount(0);
     for (pkgSourceList::const_iterator source = list.begin(); source != list.end(); ++source) {
+        if (selected != NULL && *source != selected)
+            continue;
         ++sourceCount;
         std::string uri((*source)->GetURI());
         const std::string canonical(CYSourceIdentity::CanonicalURI(uri));
@@ -5808,16 +5880,30 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
     }
     CYRootlessDiag(@"REFRESH", @"sourceEntries=%zu externalEntries=%zu", sourceCount, externalCount);
 
-    FileFd lock = FileFd(GetLock(_config->FindDir("Dir::State::Lists") + "lock"), true);
+    // A targeted fetcher keeps its lock until error processing has finished.
+    // Avoid taking a second fcntl lock on the same file in the partial path.
+    FileFd lock = FileFd(sourceKey == nil ?
+        GetLock(_config->FindDir("Dir::State::Lists") + "lock") : -1, true);
+    pkgAcquire targeted(&status);
+    if (selected != NULL && !targeted.GetLock(_config->FindDir("Dir::State::Lists"))) {
+        [self popErrorWithTitle:title];
+        return false;
+    }
     if ([self popErrorWithTitle:title]) {
         CYRootlessDiag(@"REFRESH", @"end status=failed phase=lists-lock durationMs=%llu", (unsigned long long) ((_timestamp - diagnosticsStart) / 1000));
-        CYStoreRepositoryVerificationState(false, false);
+        if (sourceKey == nil)
+            CYStoreRepositoryVerificationState(false, false);
         return false;
     }
 
     [delegate_ performSelectorOnMainThread:@selector(retainNetworkActivityIndicator) withObject:nil waitUntilDone:YES];
 
-    bool success(ListUpdate(status, list, PulseInterval_));
+    // Keep the full list alive to preserve the parsed components, architecture
+    // filters and signing options. Enqueue only this source; do not run the
+    // all-source cleanup or hooks against a one-source acquisition queue.
+    bool success(selected != NULL ?
+        (selected->GetIndexes(&targeted, false) && AcquireUpdate(targeted, PulseInterval_, false, false)) :
+        ListUpdate(status, list, PulseInterval_));
     bool cancelled(status.WasCancelled());
     bool fatal(false);
     bool sourceIsolated(false);
@@ -5844,8 +5930,12 @@ static bool CYIsCydiaManagedSourceURI(const std::string &uri) {
     // Home never overstates the result.
     bool usable(!cancelled && !fatal && quarantined == 0 && (success || sourceIsolated));
     bool verified(usable && success && !sourceIsolated && isolatedFailures == 0);
-    CYStoreRepositoryVerificationState(verified, usable,
-        usable ? isolatedFailures : 0, sourceIssues);
+    if (selected == NULL)
+        CYStoreRepositoryVerificationState(verified, usable,
+            usable ? isolatedFailures : 0, sourceIssues);
+    else if (!cancelled)
+        CYStoreSingleRepositoryRefreshState([NSString stringWithUTF8String:selected->GetURI().c_str()],
+            verified, usable, matchingURIEntries == 1, sourceIssues);
 
     [delegate_ performSelectorOnMainThread:@selector(releaseNetworkActivityIndicator) withObject:nil waitUntilDone:YES];
     CYRootlessDiag(@"REFRESH", @"end status=%@ listUpdateSuccess=%d fatal=%d cancelled=%d sourceIsolated=%d isolatedFailures=%zu quarantined=%zu durationMs=%llu",
@@ -6399,12 +6489,15 @@ static NSString *const CYModernPackageIconDidLoadNotification = @"CYModernPackag
 static NSCache *CYModernPackageIconCache(void);
 static void CYPersistModernPackageIcon(NSString *address, NSData *data);
 static UIImage *CYModernPackageIconFromDisk(NSString *address);
+static UIImage *CYPreparedPackageIcon(NSData *data, CGFloat scale);
+static NSUInteger CYPackageIconMemoryCost(UIImage *image);
 
 @protocol ConfirmationControllerDelegate
 - (void) cancelAndClear:(bool)clear;
 - (void) confirmWithNavigationController:(UINavigationController *)navigation;
 - (void) queue;
 - (bool) requestUpdate;
+- (bool) requestUpdateForSourceKey:(NSString *)sourceKey;
 @end
 
 static UIView *CYModernNativeControllerRoot(NSString *surface) {
@@ -6538,10 +6631,10 @@ static UIView *CYModernNativeControllerRoot(NSString *surface) {
                                 NSHTTPURLResponse *http([response isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *) response : nil);
                                 if (error != nil || [http statusCode] != 200 || [data length] == 0 || [data length] > 3 * 1024 * 1024)
                                     return;
-                                UIImage *downloaded([UIImage imageWithData:data scale:[[UIScreen mainScreen] scale]]);
+                                UIImage *downloaded(CYPreparedPackageIcon(data, [[UIScreen mainScreen] scale]));
                                 if (downloaded == nil || [downloaded size].width < 2.0f || [downloaded size].height < 2.0f)
                                     return;
-                                [CYModernPackageIconCache() setObject:downloaded forKey:remoteIconAddress cost:[data length]];
+                                [CYModernPackageIconCache() setObject:downloaded forKey:remoteIconAddress cost:CYPackageIconMemoryCost(downloaded)];
                                 CYPersistModernPackageIcon(remoteIconAddress, data);
                                 dispatch_async(dispatch_get_main_queue(), ^{
                                     [[NSNotificationCenter defaultCenter]
@@ -7718,6 +7811,46 @@ static void CYPersistModernPackageIcon(NSString *address, NSData *data) {
     CYPruneModernPackageIconDiskCacheOnce();
 }
 
+// Decode a bounded, screen-scale bitmap before handing an icon to UIKit.
+// The 96-point target stays sharp in both list rows and package headers.
+static UIImage *CYPreparedPackageIcon(NSData *data, CGFloat scale) {
+    if ([data length] == 0 || [data length] > 3 * 1024 * 1024)
+        return nil;
+    CGImageSourceRef source(CGImageSourceCreateWithData((CFDataRef)data, (CFDictionaryRef)@{(id)kCGImageSourceShouldCache: @NO}));
+    if (source == NULL)
+        return nil;
+    NSDictionary *options(@{
+        (id)kCGImageSourceCreateThumbnailFromImageAlways: @YES,
+        (id)kCGImageSourceCreateThumbnailWithTransform: @YES,
+        (id)kCGImageSourceThumbnailMaxPixelSize: @(ceil(96.0f * MAX(1.0f, scale))),
+        (id)kCGImageSourceShouldCacheImmediately: @YES
+    });
+    CGImageRef bitmap(CGImageSourceCreateThumbnailAtIndex(source, 0, (CFDictionaryRef)options));
+    CFRelease(source);
+    if (bitmap == NULL)
+        return nil;
+    UIImage *image([UIImage imageWithCGImage:bitmap scale:MAX(1.0f, scale) orientation:UIImageOrientationUp]);
+    CGImageRelease(bitmap);
+    return [image size].width >= 2.0f && [image size].height >= 2.0f ? image : nil;
+}
+
+static NSUInteger CYPackageIconMemoryCost(UIImage *image) {
+    CGImageRef bitmap([image CGImage]);
+    return bitmap == NULL ? 0 : CGImageGetBytesPerRow(bitmap) * CGImageGetHeight(bitmap);
+}
+
+static NSOperationQueue *CYPackageIconReadQueue(void) {
+    static NSOperationQueue *queue(nil);
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        queue = [[NSOperationQueue alloc] init];
+        [queue setName:@"com.saurik.Cydia.package-icon-read"];
+        [queue setQualityOfService:NSQualityOfServiceUserInitiated];
+        [queue setMaxConcurrentOperationCount:2];
+    });
+    return queue;
+}
+
 static UIImage *CYModernPackageIconFromDisk(NSString *address) {
     if ([address length] == 0)
         return nil;
@@ -7726,10 +7859,10 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
         options:NSDataReadingMappedIfSafe error:NULL]);
     if ([data length] == 0 || [data length] > 3 * 1024 * 1024)
         return nil;
-    UIImage *image([UIImage imageWithData:data scale:[[UIScreen mainScreen] scale]]);
+    UIImage *image(CYPreparedPackageIcon(data, [[UIScreen mainScreen] scale]));
     if (image == nil || [image size].width < 2.0f || [image size].height < 2.0f)
         return nil;
-    [CYModernPackageIconCache() setObject:image forKey:address cost:[data length]];
+    [CYModernPackageIconCache() setObject:image forKey:address cost:CYPackageIconMemoryCost(image)];
     return image;
 }
 
@@ -7751,6 +7884,8 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
     _H<UILabel> sourceLabel_;
     _H<UILabel> descriptionLabel_;
     _H<NSString> representedPackageIdentifier_;
+    _H<NSOperation> iconReadOperation_;
+    NSUInteger iconRequestGeneration_;
     _H<NSURLSessionDataTask> remoteIconTask_;
     bool summarized_;
 }
@@ -7864,6 +7999,9 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
 }
 
 - (void) prepareForReuse {
+    ++iconRequestGeneration_;
+    [iconReadOperation_ cancel];
+    iconReadOperation_ = nil;
     [remoteIconTask_ cancel];
     remoteIconTask_ = nil;
     representedPackageIdentifier_ = nil;
@@ -7876,6 +8014,9 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
 - (void) setPackage:(Package *)package asSummary:(bool)summary {
     summarized_ = summary;
 
+    NSUInteger generation(++iconRequestGeneration_);
+    [iconReadOperation_ cancel];
+    iconReadOperation_ = nil;
     [remoteIconTask_ cancel];
     remoteIconTask_ = nil;
     representedPackageIdentifier_ = package == nil ? nil : [NSString stringWithString:[package id]];
@@ -7960,33 +8101,49 @@ static UIImage *CYModernPackageIconFromDisk(NSString *address) {
     NSString *remoteIconAddress([remoteIconURL absoluteString]);
     UIImage *cachedRemoteIcon([remoteIconAddress length] == 0 ? nil :
         [CYModernPackageIconCache() objectForKey:remoteIconAddress]);
-    if (cachedRemoteIcon == nil && [remoteIconAddress length] != 0)
-        cachedRemoteIcon = CYModernPackageIconFromDisk(remoteIconAddress);
     if (cachedRemoteIcon != nil) {
         [iconView_ setImage:cachedRemoteIcon];
     } else if ([remoteIconAddress length] != 0) {
         NSString *requestedIdentifier([NSString stringWithString:[package id]]);
-        NSURLRequest *request([NSURLRequest requestWithURL:remoteIconURL
-            cachePolicy:NSURLRequestReturnCacheDataElseLoad timeoutInterval:15.0]);
-        remoteIconTask_ = [[NSURLSession sharedSession] dataTaskWithRequest:request
-            completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                NSHTTPURLResponse *http([response isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *) response : nil);
-                if (error != nil || [http statusCode] != 200 || [data length] == 0 || [data length] > 3 * 1024 * 1024)
-                    return;
-                UIImage *downloaded([UIImage imageWithData:data scale:[[UIScreen mainScreen] scale]]);
-                if (downloaded == nil || [downloaded size].width < 2.0f || [downloaded size].height < 2.0f)
-                    return;
-                [CYModernPackageIconCache() setObject:downloaded forKey:remoteIconAddress cost:[data length]];
-                CYPersistModernPackageIcon(remoteIconAddress, data);
+        CGFloat scale([[UIScreen mainScreen] scale]);
+        iconReadOperation_ = [NSBlockOperation blockOperationWithBlock:^{
+            @autoreleasepool {
+                UIImage *diskIcon([CYModernPackageIconCache() objectForKey:remoteIconAddress]);
+                if (diskIcon == nil)
+                    diskIcon = CYModernPackageIconFromDisk(remoteIconAddress);
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    if (![representedPackageIdentifier_ isEqualToString:requestedIdentifier])
+                    if (generation != iconRequestGeneration_ || ![representedPackageIdentifier_ isEqualToString:requestedIdentifier])
                         return;
-                    [UIView transitionWithView:iconView_ duration:0.18
-                        options:UIViewAnimationOptionTransitionCrossDissolve | UIViewAnimationOptionAllowUserInteraction
-                        animations:^{ [iconView_ setImage:downloaded]; } completion:nil];
+                    iconReadOperation_ = nil;
+                    if (diskIcon != nil) {
+                        [iconView_ setImage:diskIcon];
+                        return;
+                    }
+                    NSURLRequest *request([NSURLRequest requestWithURL:remoteIconURL
+                        cachePolicy:NSURLRequestReturnCacheDataElseLoad timeoutInterval:15.0]);
+                    remoteIconTask_ = [[NSURLSession sharedSession] dataTaskWithRequest:request
+                        completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                            NSHTTPURLResponse *http([response isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)response : nil);
+                            if (error != nil || [http statusCode] != 200)
+                                return;
+                            UIImage *downloaded(CYPreparedPackageIcon(data, scale));
+                            if (downloaded == nil)
+                                return;
+                            [CYModernPackageIconCache() setObject:downloaded forKey:remoteIconAddress cost:CYPackageIconMemoryCost(downloaded)];
+                            CYPersistModernPackageIcon(remoteIconAddress, data);
+                            dispatch_async(dispatch_get_main_queue(), ^{
+                                if (generation != iconRequestGeneration_ || ![representedPackageIdentifier_ isEqualToString:requestedIdentifier])
+                                    return;
+                                // No per-row cross-dissolve while the list is moving.
+                                [iconView_ setImage:downloaded];
+                                remoteIconTask_ = nil;
+                            });
+                        }];
+                    [remoteIconTask_ resume];
                 });
-            }];
-        [remoteIconTask_ resume];
+            }
+        }];
+        [CYPackageIconReadQueue() addOperation:iconReadOperation_];
     }
     [badgeView_ setImage:badge_];
     [badgeView_ setHidden:badge_ == nil];
@@ -8622,10 +8779,10 @@ enum CYCommercialPackageAccess {
                         NSHTTPURLResponse *http([response isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *) response : nil);
                         if (error != nil || [http statusCode] != 200 || [data length] == 0 || [data length] > 3 * 1024 * 1024)
                             return;
-                        UIImage *downloaded([UIImage imageWithData:data scale:[[UIScreen mainScreen] scale]]);
+                        UIImage *downloaded(CYPreparedPackageIcon(data, [[UIScreen mainScreen] scale]));
                         if (downloaded == nil || [downloaded size].width < 2.0f || [downloaded size].height < 2.0f)
                             return;
-                        [CYModernPackageIconCache() setObject:downloaded forKey:remoteIconAddress cost:[data length]];
+                        [CYModernPackageIconCache() setObject:downloaded forKey:remoteIconAddress cost:CYPackageIconMemoryCost(downloaded)];
                         CYPersistModernPackageIcon(remoteIconAddress, data);
                         dispatch_async(dispatch_get_main_queue(), ^{
                             if (package_ == nil || ![[package_ id] isEqualToString:requestedIdentifier])
@@ -8696,6 +8853,8 @@ enum CYCommercialPackageAccess {
         if (primaryInstall) enabled = NO;
     }
     if (purchaseInProgress_) { detail = CYLocalize(@"Purchasing\u2026"); enabled = NO; }
+    NSDictionary *accountState(CYRepositoryAccountStateSnapshot([[package_ source] rooturi]));
+    [modernDetail_ setAccountState:[accountState objectForKey:@"state"]];
     [modernDetail_ setAccountNotice:CYLocalize(@"Manage sign-ins and explore your purchases.")
         target:self action:@selector(openRepositoryAccount)];
     [modernDetail_ setActionTitle:title destructive:(buttons_.size() == 1 && [buttons_[0].first isEqualToString:@"REMOVE"])
@@ -9167,12 +9326,14 @@ enum CYCommercialPackageAccess {
     std::vector<NSInteger> offset_;
 
     unsigned reloading_;
+    BOOL packageSwipePending_;
 }
 
 - (id) initWithDatabase:(Database *)database title:(NSString *)title;
 
 - (NSArray *) sectionsForPackages:(NSMutableArray *)packages;
 - (NSString *) packageIdentifierAtIndexPath:(NSIndexPath *)path;
+- (BOOL) performPackageSwipeAction:(NSString *)action forIdentifier:(NSString *)identifier;
 
 @end
 
@@ -9253,9 +9414,13 @@ enum CYCommercialPackageAccess {
     if (cell == nil)
         cell = [[[PackageCell alloc] init] autorelease];
 
-    NSString *identifier([self packageIdentifierAtIndexPath:path]);
-    Package *package([database_ packageWithName:identifier]);
-    [cell setPackage:package asSummary:[self isSummarized]];
+    // The list already owns the candidate objects for this database era.
+    // Reuse their parsed metadata instead of constructing and parsing another
+    // Package every time a row reappears. Hold the era lock through binding;
+    // actions still resolve a fresh package by its copied identifier.
+    @synchronized (database_) {
+        [cell setPackage:[self packageAtIndexPath:path] asSummary:[self isSummarized]];
+    }
     return cell;
 }
 
@@ -9270,6 +9435,91 @@ enum CYCommercialPackageAccess {
         return;
     }
     [self didSelectPackage:package];
+}
+
+// Re-resolve by copied identifier after the contextual-action UI has closed.
+// The normal delegate still owns transaction gating, resolution and Review.
+- (BOOL) performPackageSwipeAction:(NSString *)action forIdentifier:(NSString *)identifier {
+    if ([identifier length] == 0 || ![self isViewLoaded] || [[self view] window] == nil ||
+        [[self navigationController] topViewController] != self || [self presentedViewController] != nil || [self isEditing])
+        return NO;
+
+    _H<Package> package;
+    BOOL installed(NO), commercial(NO), available(NO), queued(NO);
+    @synchronized (database_) {
+        if ([database_ ready]) {
+            package = [database_ packageWithName:identifier];
+            if (package != nil) {
+                installed = ![package uninstalled];
+                commercial = [package isCommercial];
+                available = [package source] != nil;
+                queued = [package mode] != nil;
+            }
+        }
+    }
+    if (package == nil) {
+        [self reloadData];
+        return NO;
+    }
+
+    if ([action isEqualToString:@"remove"] && installed && !queued) {
+        [self.delegate removePackage:package];
+        return YES;
+    }
+    if ([action isEqualToString:@"install"] && !installed && !commercial && available && !queued) {
+        [self.delegate installPackage:package];
+        return YES;
+    }
+    if ([action isEqualToString:@"details"] || [action isEqualToString:@"remove"] || [action isEqualToString:@"install"]) {
+        // Paid packages and changed/queued state use the central details flow.
+        // Never replace a queued version or duplicate account checks here.
+        [self didSelectPackage:package];
+        return YES;
+    }
+    return NO;
+}
+
+- (UISwipeActionsConfiguration *) tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)path {
+    if ([self isEditing] || packageSwipePending_)
+        return nil;
+    NSString *identifier(nil);
+    BOOL installed(NO), commercial(NO), available(NO), queued(NO);
+    @synchronized (database_) {
+        if (![database_ ready]) return nil;
+        identifier = [self packageIdentifierAtIndexPath:path];
+        Package *package([database_ packageWithName:identifier]);
+        if ([identifier length] == 0 || package == nil) return nil;
+        installed = ![package uninstalled];
+        commercial = [package isCommercial];
+        available = [package source] != nil;
+        queued = [package mode] != nil;
+    }
+
+    NSString *operation(@"details");
+    NSString *title(UCLocalize("DETAILS"));
+    NSString *symbol(queued ? @"ellipsis.circle" : (commercial ? @"creditcard" : @"info.circle"));
+    UIContextualActionStyle style(UIContextualActionStyleNormal);
+    if (!queued && installed) {
+        operation = @"remove"; title = UCLocalize("REMOVE"); symbol = @"trash";
+        style = UIContextualActionStyleDestructive;
+    } else if (!queued && !commercial && available) {
+        operation = @"install"; title = UCLocalize("INSTALL"); symbol = @"arrow.down.circle";
+    }
+    UIContextualAction *item([UIContextualAction contextualActionWithStyle:style title:title
+        handler:^(UIContextualAction *action, UIView *view, void (^completion)(BOOL)) {
+            if (packageSwipePending_) { completion(NO); return; }
+            packageSwipePending_ = YES;
+            completion(YES);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                packageSwipePending_ = NO;
+                [self performPackageSwipeAction:operation forIdentifier:identifier];
+            });
+        }]);
+    [item setImage:[UIImage cy_symbolNamed:symbol]];
+    [item setBackgroundColor:style == UIContextualActionStyleDestructive ? [UIColor systemRedColor] : CYModernAccentColor()];
+    UISwipeActionsConfiguration *configuration([UISwipeActionsConfiguration configurationWithActions:@[item]]);
+    [configuration setPerformsFirstActionWithFullSwipe:NO];
+    return configuration;
 }
 
 - (NSArray *) sectionIndexTitlesForTableView:(UITableView *)tableView {
@@ -9788,10 +10038,10 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
                         NSHTTPURLResponse *http([response isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *) response : nil);
                         if (error != nil || [http statusCode] != 200 || [data length] == 0 || [data length] > 3 * 1024 * 1024)
                             return;
-                        UIImage *downloaded([UIImage imageWithData:data scale:[[UIScreen mainScreen] scale]]);
+                        UIImage *downloaded(CYPreparedPackageIcon(data, [[UIScreen mainScreen] scale]));
                         if (downloaded == nil || [downloaded size].width < 2.0f || [downloaded size].height < 2.0f)
                             return;
-                        [CYModernPackageIconCache() setObject:downloaded forKey:remoteIconAddress cost:[data length]];
+                        [CYModernPackageIconCache() setObject:downloaded forKey:remoteIconAddress cost:CYPackageIconMemoryCost(downloaded)];
                         CYPersistModernPackageIcon(remoteIconAddress, data);
                         dispatch_async(dispatch_get_main_queue(), ^{
                             [[NSNotificationCenter defaultCenter]
@@ -10155,6 +10405,8 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
     bool updating_;
     bool pendingUpdate_;
     bool cancelRequested_;
+    _H<NSString> updatingSourceKey_;
+    NSUInteger sourceRefreshGeneration_;
     bool hasRepositoryVerificationResult_;
     bool repositoriesVerified_;
     _H<UIActivityIndicatorView> sourceActivity_;
@@ -10164,6 +10416,7 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
 }
 
 - (void) beginUpdate;
+- (void) beginUpdateForSourceKey:(NSString *)sourceKey;
 - (void) queueUpdateAfterCurrent;
 - (BOOL) updating;
 - (BOOL) hasRepositoryVerificationResult;
@@ -10171,7 +10424,7 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
 - (void) refreshHomeStatus;
 - (void) setSourceActivityVisible:(BOOL)visible;
 - (void) layoutSourceActivity;
-- (void) showSourceCompletionWithVerification:(NSNumber *)verified;
+- (void) showSourceCompletionWithResult:(NSDictionary *)result;
 - (void) restoreSelectedTabAfterUpdate:(NSNumber *)index;
 - (void) synchronizeSourceRefreshUI;
 
@@ -10229,7 +10482,9 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
     }
 }
 
-- (void) showSourceCompletionWithVerification:(NSNumber *)verified {
+- (void) showSourceCompletionWithResult:(NSDictionary *)result {
+    if (updating_ || [[result objectForKey:@"generation"] unsignedIntegerValue] != sourceRefreshGeneration_)
+        return;
     [self setSourceActivityVisible:NO];
     [sourceCompletion_ removeFromSuperview];
     sourceCompletion_ = nil;
@@ -10237,7 +10492,7 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
     // Green means that refreshed package data is usable. Operational source
     // problems remain orange; signing-key compatibility is handled by APT and
     // no longer requires a separate user approval step.
-    BOOL success([verified boolValue] || CYRepositoryRefreshReadyForUse());
+    BOOL success([[result objectForKey:@"success"] boolValue]);
     UIColor *color(success ? [UIColor systemGreenColor] : [UIColor systemOrangeColor]);
     NSString *symbol(success ? @"checkmark.circle.fill" : @"exclamationmark.circle.fill");
     sourceCompletion_ = [[[CydiaSymbolView alloc] initWithImage:[UIImage cy_symbolNamed:symbol]] autorelease];
@@ -10251,7 +10506,7 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
     [[sourceCompletion_ layer] setCornerCurve:kCACornerCurveContinuous];
     [sourceCompletion_ setUserInteractionEnabled:NO];
     [sourceCompletion_ setIsAccessibilityElement:YES];
-    [sourceCompletion_ setAccessibilityLabel:success ? CYLocalize(@"Sources refreshed") : CYLocalize(@"Source refresh completed with warnings")];
+    [sourceCompletion_ setAccessibilityLabel:success ? [result objectForKey:@"label"] : CYLocalize(@"Source refresh completed with warnings")];
     [[self tabBar] addSubview:sourceCompletion_];
     [self layoutSourceActivity];
 
@@ -10293,8 +10548,14 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
 }
 
 - (void) beginUpdate {
+    [self beginUpdateForSourceKey:nil];
+}
+
+- (void) beginUpdateForSourceKey:(NSString *)sourceKey {
     if (updating_)
         return;
+    updatingSourceKey_ = sourceKey == nil ? nil : [NSString stringWithString:sourceKey];
+    ++sourceRefreshGeneration_;
 
     [[sourceCompletion_ layer] removeAllAnimations];
     [sourceCompletion_ removeFromSuperview];
@@ -10331,7 +10592,7 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
     NSAutoreleasePool *pool([[NSAutoreleasePool alloc] init]);
 
     SourceStatus status(self, database_);
-    bool verified([database_ updateWithStatus:status]);
+    bool verified([database_ updateWithStatus:status sourceKey:updatingSourceKey_]);
 
     [self
         performSelectorOnMainThread:@selector(completeUpdateWithVerification:)
@@ -10399,14 +10660,24 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
         return;
 
     BOOL cancelled(cancelRequested_);
+    BOOL singleSource(updatingSourceKey_ != nil);
+    NSString *completedName([NSString stringWithString:
+        [[database_ sourceWithKey:updatingSourceKey_] name] ?: UCLocalize("SOURCES")]);
+    updatingSourceKey_ = nil;
     // cancelUpdate clears an already queued pass. If a source is added or
     // removed after that cancellation request, syncData sets pendingUpdate_
     // again and the new source list still deserves its own clean pass.
     BOOL restart(pendingUpdate_);
     pendingUpdate_ = false;
     cancelRequested_ = false;
-    hasRepositoryVerificationResult_ = true;
-    repositoriesVerified_ = [verified boolValue];
+    if (singleSource) {
+        NSDictionary *state([NSDictionary dictionaryWithContentsOfFile:CacheState_]);
+        hasRepositoryVerificationResult_ = [state objectForKey:@"LastUpdateVerified"] != nil;
+        repositoriesVerified_ = [[state objectForKey:@"LastUpdateVerified"] boolValue];
+    } else {
+        hasRepositoryVerificationResult_ = true;
+        repositoriesVerified_ = [verified boolValue];
+    }
     if (restart) {
         // A source was added or removed while the current refresh was already
         // running (including after a cancellation request). Rebuild the local
@@ -10414,8 +10685,10 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
         // list update in parallel.
         [self stopUpdateWithSelector:@selector(reloadDataAndRestartSourceRefresh)];
     } else if (cancelled) {
-        repositoriesVerified_ = false;
-        CYStoreRepositoryVerificationState(false, false);
+        if (!singleSource) {
+            repositoriesVerified_ = false;
+            CYStoreRepositoryVerificationState(false, false);
+        }
         [self stopUpdateWithSelector:@selector(updateDataAndLoad)];
     } else {
         [self stopUpdateWithSelector:@selector(reloadDataAfterSourceRefresh)];
@@ -10423,7 +10696,12 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
         // but keep the currently visible process order and scroll position.
         // The refreshed selection becomes visible only after a cold launch.
         [self refreshHomeStatus];
-        [self performSelector:@selector(showSourceCompletionWithVerification:) withObject:verified afterDelay:0.05];
+        NSDictionary *result(@{
+            @"success": @([verified boolValue] || (!singleSource && CYRepositoryRefreshReadyForUse())),
+            @"generation": @(sourceRefreshGeneration_),
+            @"label": singleSource ? [NSString stringWithFormat:@"%@ — %@", completedName, UCLocalize("DONE")] : CYLocalize(@"Sources refreshed")
+        });
+        [self performSelector:@selector(showSourceCompletionWithResult:) withObject:result afterDelay:0.05];
     }
 }
 
@@ -11835,14 +12113,14 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
         returningResponse:NULL
         error:NULL
     ])
-        if (UIImage *image = [UIImage imageWithData:data]) {
+        if (UIImage *image = CYPreparedPackageIcon(data, [[UIScreen mainScreen] scale])) {
             // Persist to the shared on-disk icon cache so the repository icon
             // is read straight back on the next visit instead of re-fetched,
             // which is what made the Sources list flash a placeholder on entry.
             NSString *address([url absoluteString]);
             if ([address length] != 0) {
                 CYPersistModernPackageIcon(address, data);
-                [CYModernPackageIconCache() setObject:image forKey:address cost:[data length]];
+                [CYModernPackageIconCache() setObject:image forKey:address cost:CYPackageIconMemoryCost(image)];
             }
             [self performSelectorOnMainThread:@selector(_setImage:) withObject:[NSArray arrayWithObjects:url, image, nil] waitUntilDone:NO];
         }
@@ -12235,24 +12513,62 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
 }
 
 - (BOOL) tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath {
-    if ([indexPath section] != 1)
-        return false;
-    Source *source = [self sourceAtIndexPath:indexPath];
-    return [source record] != nil;
+    return [self sourceAtIndexPath:indexPath] != nil;
+}
+
+- (UITableViewCellEditingStyle) tableView:(UITableView *)tableView editingStyleForRowAtIndexPath:(NSIndexPath *)indexPath {
+    Source *source([self sourceAtIndexPath:indexPath]);
+    NSString *key([source key]);
+    return key != nil && [source record] != nil && [source record] == [Sources_ objectForKey:key] &&
+        ![self.delegate updating] ? UITableViewCellEditingStyleDelete : UITableViewCellEditingStyleNone;
+}
+
+- (BOOL) removeSourceWithKey:(NSString *)key expectedRecord:(NSDictionary *)record {
+    if ([key length] == 0 || record == nil || [self.delegate updating])
+        return NO;
+    @synchronized (database_) {
+        Source *source([database_ sourceWithKey:key]);
+        if ([source record] != record || [Sources_ objectForKey:key] != record)
+            return NO;
+        [Sources_ removeObjectForKey:key];
+    }
+    [self.delegate syncData];
+    return YES;
+}
+
+- (UISwipeActionsConfiguration *) tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
+    Source *source([self sourceAtIndexPath:indexPath]);
+    NSString *key([source key]);
+    if ([key length] == 0 || [self.delegate updating])
+        return nil;
+    NSString *sourceKey([NSString stringWithString:key]);
+    NSMutableArray *actions([NSMutableArray array]);
+    NSDictionary *record([source record]);
+    if (record != nil && record == [Sources_ objectForKey:sourceKey]) {
+        UIContextualAction *remove([UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive
+            title:UCLocalize("REMOVE") handler:^(UIContextualAction *action, UIView *view, void (^completion)(BOOL)) {
+                completion([self removeSourceWithKey:sourceKey expectedRecord:record]);
+            }]);
+        [remove setImage:[UIImage cy_symbolNamed:@"trash"]];
+        [actions addObject:remove];
+    }
+    UIContextualAction *refresh([UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal
+        title:UCLocalize("REFRESH") handler:^(UIContextualAction *action, UIView *view, void (^completion)(BOOL)) {
+            completion([self.delegate requestUpdateForSourceKey:sourceKey]);
+        }]);
+    [refresh setImage:[UIImage cy_symbolNamed:@"arrow.clockwise"]];
+    [refresh setBackgroundColor:CYModernAccentColor()];
+    [actions addObject:refresh];
+    UISwipeActionsConfiguration *configuration([UISwipeActionsConfiguration configurationWithActions:actions]);
+    [configuration setPerformsFirstActionWithFullSwipe:NO];
+    return configuration;
 }
 
 - (void) tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath {
-    _assert([indexPath section] == 1);
-    if (editingStyle ==  UITableViewCellEditingStyleDelete) {
-        Source *source = [self sourceAtIndexPath:indexPath];
-        if (source == nil) return;
-
-        CYRootlessDiag(@"SOURCES", @"delete requested name=%@ uri=%@ key=%@",
-            [source name] ?: @"<nil>", CYRootlessDiagnosticsText([source rooturi]), [source key] ?: @"<nil>");
-        [Sources_ removeObjectForKey:[source key]];
-
-        [self.delegate syncData];
-    }
+    if (editingStyle != UITableViewCellEditingStyleDelete)
+        return;
+    Source *source([self sourceAtIndexPath:indexPath]);
+    [self removeSourceWithKey:[source key] expectedRecord:[source record]];
 }
 
 - (void) tableView:(UITableView *)tableView didEndEditingRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -12755,6 +13071,10 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
 }
 
 - (bool) requestUpdate {
+    return [self requestUpdateForSourceKey:nil];
+}
+
+- (bool) requestUpdateForSourceKey:(NSString *)sourceKey {
     if (packageTransactionActive_) {
         UIAlertController *alert([UIAlertController alertControllerWithTitle:CYLocalize(@"Package Changes Open")
             message:CYLocalize(@"Finish or cancel the current package changes before refreshing Sources.")
@@ -12772,7 +13092,12 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
     // Refresh the repositories the user actually configured. Availability of
     // the historical cydia.saurik.com host says nothing about those sources.
     CYRootlessDiag(@"AUTO_REFRESH", @"manual requested repositoryReachability=per-source duplicateGuard=updating");
-    [self beginUpdate];
+    if (sourceKey != nil) {
+        if ([sourceKey length] == 0 || [database_ sourceWithKey:sourceKey] == nil)
+            return false;
+        [tabbar_ beginUpdateForSourceKey:sourceKey];
+    } else
+        [self beginUpdate];
     return true;
 }
 

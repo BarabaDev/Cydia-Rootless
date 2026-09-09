@@ -529,3 +529,7 @@
 
 /* Updated purchase quote. */
 "Modern.The price changed. Review the updated price and confirm again." = "価格が変更されました。更新された価格を確認して、もう一度確定してください。";
+
+/* Repository account state, independent of package ownership. */
+"Modern.Not signed in" = "未サインイン";
+"Modern.Checking…" = "確認中…";

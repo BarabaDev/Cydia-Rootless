@@ -529,3 +529,7 @@
 
 /* Updated purchase quote. */
 "Modern.The price changed. Review the updated price and confirm again." = "Fiyat değişti. Güncel fiyatı kontrol edip tekrar onaylayın.";
+
+/* Repository account state, independent of package ownership. */
+"Modern.Not signed in" = "Giriş yapılmadı";
+"Modern.Checking…" = "Kontrol ediliyor…";

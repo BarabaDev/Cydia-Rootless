@@ -530,3 +530,7 @@
 
 /* Updated purchase quote. */
 "Modern.The price changed. Review the updated price and confirm again." = "Giá đã thay đổi. Hãy kiểm tra giá cập nhật và xác nhận lại.";
+
+/* Repository account state, independent of package ownership. */
+"Modern.Not signed in" = "Chưa đăng nhập";
+"Modern.Checking…" = "Đang kiểm tra…";

@@ -530,3 +530,7 @@
 
 /* Updated purchase quote. */
 "Modern.The price changed. Review the updated price and confirm again." = "ราคามีการเปลี่ยนแปลง โปรดตรวจสอบราคาที่อัปเดตแล้วและยืนยันอีกครั้ง";
+
+/* Repository account state, independent of package ownership. */
+"Modern.Not signed in" = "ยังไม่ได้ลงชื่อเข้าใช้";
+"Modern.Checking…" = "กำลังตรวจสอบ…";

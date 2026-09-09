@@ -34,7 +34,9 @@
 #include <string>
 #include <vector>
 #include <spawn.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
+#include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
 
@@ -53,8 +55,20 @@ extern _H<NSMutableDictionary> Sources_;
 static const char *CydiaManagedSourcesList_ = "/var/jb/etc/apt/sources.list.d/cydia-added.list";
 
 static bool CydiaIsManagedSourcePath(const std::string &path) {
-    return path == CydiaManagedSourcesList_ ||
-        path == "/var/jb/etc/apt/sources.list.d/cydia.list";
+    if (path == CydiaManagedSourcesList_)
+        return true;
+    if (path != "/var/jb/etc/apt/sources.list.d/cydia.list")
+        return false;
+
+    // Mirror cydo's legacy cleanup ownership rule: a user/bootstrap file or
+    // foreign symlink named cydia.list remains an external source.
+    struct stat info;
+    if (lstat(path.c_str(), &info) != 0 || !S_ISLNK(info.st_mode))
+        return false;
+    char target[4096];
+    ssize_t size(readlink(path.c_str(), target, sizeof(target)));
+    return size >= 0 && std::string(target, static_cast<size_t>(size)) ==
+        "/var/mobile/Library/Caches/com.saurik.Cydia/sources.list";
 }
 
 static std::string CydiaReadSourceFile(const std::string &path) {

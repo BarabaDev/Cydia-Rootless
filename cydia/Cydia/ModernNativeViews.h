@@ -1,4 +1,4 @@
-/* Cydia 1.1.26 Rootless - complete native iOS 15+ transaction UI */
+/* Cydia 1.1.27 Rootless - complete native iOS 15+ transaction UI */
 
 #ifndef Cydia_ModernNativeViews_H
 #define Cydia_ModernNativeViews_H
@@ -99,6 +99,8 @@ typedef NS_ENUM(NSUInteger, CydiaRestartKind) {
 - (void) setLoading:(BOOL)loading;
 - (void) setCommercial:(BOOL)commercial;
 - (void) setAccountNotice:(NSString *)notice target:(id)target action:(SEL)action;
+// Display only: existing account snapshot tokens, independent of package ownership.
+- (void) setAccountState:(NSString *)state;
 - (void) setActionEnabled:(BOOL)enabled;
 - (void) setActionStatusDetail:(NSString *)detail;
 - (void) setUnavailableIdentifier:(NSString *)identifier;

@@ -529,3 +529,7 @@
 
 /* Updated purchase quote. */
 "Modern.The price changed. Review the updated price and confirm again." = "가격이 변경되었습니다. 변경된 가격을 확인한 후 다시 확정해 주세요.";
+
+/* Repository account state, independent of package ownership. */
+"Modern.Not signed in" = "로그인되지 않음";
+"Modern.Checking…" = "확인 중…";

@@ -1,4 +1,4 @@
-/* Cydia 1.1.26 Rootless - complete native iOS 15+ transaction UI */
+/* Cydia 1.1.27 Rootless - complete native iOS 15+ transaction UI */
 
 #include "Cydia/ModernLocalization.h"
 #include "Cydia/ModernNativeViews.h"
@@ -1636,7 +1636,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
         [featuredScroll_ addSubview:featuredStack_];
 
         UILabel *footer(CYM3Label(UIFontTextStyleFootnote, [UIColor secondaryLabelColor], 1));
-        [footer setText:@"Cydia 1.1.26"];
+        [footer setText:@"Cydia 1.1.27"];
         homeVersion_ = footer;
         [footer setTextAlignment:NSTextAlignmentCenter];
 
@@ -3559,6 +3559,13 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
     UIVisualEffectView *accountNoticeCard_;
     UILabel *accountNotice_;
     UIButton *accountNoticeButton_;
+    UIStackView *accountStateRow_;
+    UIImageView *accountStateIcon_;
+    UILabel *accountStateLabel_;
+    NSString *accountState_;
+    NSLayoutConstraint *accountStateHeight_;
+    CGFloat accountStateMeasuredWidth_;
+    UIFont *accountStateMeasuredFont_;
     UIImageView *stateIcon_;
     UIView *stateTile_;
     UILabel *stateTitle_;
@@ -3587,6 +3594,9 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
     [identityWidth_ release];
     [commercialBadge_ release];
     [accountNoticeCard_ release];
+    [accountState_ release];
+    [accountStateHeight_ release];
+    [accountStateMeasuredFont_ release];
     [super dealloc];
 }
 
@@ -3697,6 +3707,23 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
         accountNoticeCard_ = [CYM3ContentCard(20.0f) retain];
         [accountNoticeCard_ setAccessibilityIdentifier:@"CydiaPackageAccountNotice"];
         accountNotice_ = CYM3Label(UIFontTextStyleBody, [UIColor secondaryLabelColor], 0);
+        accountStateIcon_ = [[[CydiaSymbolView alloc] init] autorelease];
+        [accountStateIcon_ setTranslatesAutoresizingMaskIntoConstraints:NO];
+        [accountStateIcon_ setPreferredSymbolConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:18.0f weight:UIImageSymbolWeightMedium]];
+        [accountStateIcon_ setContentMode:UIViewContentModeScaleAspectFit];
+        [accountStateIcon_ setIsAccessibilityElement:NO];
+        accountStateLabel_ = CYM3Label(UIFontTextStyleSubheadline, [UIColor labelColor], 0);
+        [accountStateLabel_ setLineBreakMode:NSLineBreakByWordWrapping];
+        [accountStateLabel_ setIsAccessibilityElement:NO];
+        accountStateRow_ = [[[UIStackView alloc] initWithArrangedSubviews:@[accountStateIcon_, accountStateLabel_]] autorelease];
+        [accountStateRow_ setAxis:UILayoutConstraintAxisHorizontal];
+        [accountStateRow_ setAlignment:UIStackViewAlignmentCenter];
+        [accountStateRow_ setSpacing:8.0f];
+        [accountStateRow_ setIsAccessibilityElement:YES];
+        [accountStateRow_ setAccessibilityIdentifier:@"CydiaPackageAccountState"];
+        [accountStateRow_ setAccessibilityLabel:CYLocalize(@"Repository Accounts")];
+        accountStateHeight_ = [[[accountStateRow_ heightAnchor] constraintEqualToConstant:22.0f] retain];
+        [accountStateHeight_ setActive:YES];
         accountNoticeButton_ = [CYM3AdaptiveButton buttonWithType:UIButtonTypeSystem];
         [accountNoticeButton_ setTitle:CYLocalize(@"Manage Account") forState:UIControlStateNormal];
         [accountNoticeButton_ setImage:[UIImage cy_symbolNamed:@"person.crop.circle"] forState:UIControlStateNormal];
@@ -3706,7 +3733,7 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
         [[accountNoticeButton_ titleLabel] setTextAlignment:NSTextAlignmentCenter];
         [accountNoticeButton_ setContentEdgeInsets:UIEdgeInsetsMake(10.0f, 14.0f, 10.0f, 14.0f)];
         [accountNoticeButton_ setAccessibilityIdentifier:@"CydiaPackageManageAccount"];
-        UIStackView *accountContent([[[UIStackView alloc] initWithArrangedSubviews:@[accountNotice_, accountNoticeButton_]] autorelease]);
+        UIStackView *accountContent([[[UIStackView alloc] initWithArrangedSubviews:@[accountNotice_, accountStateRow_, accountNoticeButton_]] autorelease]);
         [accountContent setTranslatesAutoresizingMaskIntoConstraints:NO];
         [accountContent setAxis:UILayoutConstraintAxisVertical];
         [accountContent setSpacing:6.0f];
@@ -3716,8 +3743,11 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
             [[accountContent trailingAnchor] constraintEqualToAnchor:[[accountNoticeCard_ contentView] trailingAnchor] constant:-14.0f],
             [[accountContent topAnchor] constraintEqualToAnchor:[[accountNoticeCard_ contentView] topAnchor] constant:12.0f],
             [[accountContent bottomAnchor] constraintEqualToAnchor:[[accountNoticeCard_ contentView] bottomAnchor] constant:-12.0f],
+            [[accountStateIcon_ widthAnchor] constraintEqualToConstant:20.0f],
+            [[accountStateIcon_ heightAnchor] constraintEqualToConstant:20.0f],
             [[accountNoticeButton_ heightAnchor] constraintGreaterThanOrEqualToConstant:44.0f]
         ]];
+        [self setAccountState:nil];
 
         UILabel *informationTitle(CYM3Label(UIFontTextStyleCaption1, [UIColor secondaryLabelColor], 1));
         [informationTitle setText:CYLocalize(@"PACKAGE INFORMATION")];
@@ -3818,6 +3848,38 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
     [actionWidth_ setActive:!large];
     [actionContent_ setAxis:large ? UILayoutConstraintAxisVertical : UILayoutConstraintAxisHorizontal];
     [actionContent_ setAlignment:large ? UIStackViewAlignmentFill : UIStackViewAlignmentCenter];
+    [self updateAccountStateLayout];
+}
+
+- (void) updateAccountStateLayout {
+    UIFont *font([UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline compatibleWithTraitCollection:[self traitCollection]]);
+    [accountStateLabel_ setFont:font];
+    // Content margins (32), card padding (28), symbol (20) and spacing (8).
+    // Reserve every possible localized state at this width and text size, so
+    // signing in never changes the card's height. Accessibility text can wrap.
+    CGFloat width(CGRectGetWidth([self bounds]) - 88.0f);
+    if (width <= 0.0f) {
+        [accountStateHeight_ setConstant:MAX(22.0f, ceil([font lineHeight]))];
+        return;
+    }
+    if (accountStateMeasuredWidth_ == width && [accountStateMeasuredFont_ isEqual:font]) return;
+    accountStateMeasuredWidth_ = width;
+    [accountStateMeasuredFont_ release];
+    accountStateMeasuredFont_ = [font retain];
+    CGFloat height(MAX(22.0f, ceil([font lineHeight])));
+    for (NSString *label in @[CYLocalize(@"Signed in"), CYLocalize(@"Not signed in"),
+        CYLocalize(@"Checking…"), CYLocalize(@"Unavailable")]) {
+        CGRect bounds([label boundingRectWithSize:CGSizeMake(width, CGFLOAT_MAX)
+            options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
+            attributes:@{NSFontAttributeName:font} context:nil]);
+        height = MAX(height, ceil(CGRectGetHeight(bounds)));
+    }
+    [accountStateHeight_ setConstant:height];
+}
+
+- (void) layoutSubviews {
+    [self updateAccountStateLayout];
+    [super layoutSubviews];
 }
 - (void) traitCollectionDidChange:(UITraitCollection *)previous {
     [super traitCollectionDidChange:previous];
@@ -3912,7 +3974,37 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
     } else {
         [identityStack_ removeArrangedSubview:commercialBadge_];
         [commercialBadge_ removeFromSuperview];
+        [self setAccountNotice:nil target:nil action:NULL];
     }
+}
+
+- (void) setAccountState:(NSString *)state {
+    if (![state isEqualToString:@"signedIn"] && ![state isEqualToString:@"signedOut"] &&
+        ![state isEqualToString:@"unsupported"])
+        state = @"unknown";
+    if ([accountState_ isEqualToString:state]) return;
+    [accountState_ release];
+    accountState_ = [state copy];
+    NSString *label(CYLocalize(@"Checking…"));
+    NSString *symbol(@"ellipsis.circle");
+    UIColor *tint([UIColor secondaryLabelColor]);
+    if ([state isEqualToString:@"signedIn"]) {
+        label = CYLocalize(@"Signed in");
+        symbol = @"checkmark.circle.fill";
+        tint = [UIColor systemGreenColor];
+    } else if ([state isEqualToString:@"signedOut"]) {
+        label = CYLocalize(@"Not signed in");
+        symbol = @"person.crop.circle";
+    } else if ([state isEqualToString:@"unsupported"]) {
+        label = CYLocalize(@"Unavailable");
+        symbol = @"person.crop.circle";
+    }
+    [UIView performWithoutAnimation:^{
+        [accountStateLabel_ setText:label];
+        [accountStateIcon_ setImage:[UIImage cy_symbolNamed:symbol]];
+        [accountStateIcon_ setTintColor:tint];
+        [accountStateRow_ setAccessibilityValue:label];
+    }];
 }
 
 - (void) setAccountNotice:(NSString *)notice target:(id)target action:(SEL)action {
@@ -3929,6 +4021,7 @@ static UIButton *CYM3PackageInfoRow(NSString *symbol, UIColor *color, NSString *
     } else {
         [contentStack_ removeArrangedSubview:accountNoticeCard_];
         [accountNoticeCard_ removeFromSuperview];
+        [self setAccountState:nil];
     }
 }
 
