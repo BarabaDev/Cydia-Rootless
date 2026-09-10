@@ -1,3 +1,16 @@
+# Cydia 1.1.29
+
+Per-source refresh activity and presentation update by BarabaDev on **10 September 2026**.
+
+- Fixed activity attribution for individual repositories. While source objects collected indicator URLs, the shared acquisition queue let later repositories inherit URLs queued for earlier repositories.
+- Each source now receives only its own indicator URLs, so refreshing one repository does not falsely show activity on other source rows. The backend already targeted the selected repository; this correction does not change the network scope of a refresh.
+- Queued source-activity callbacks carry their source identity. A reused row ignores a callback for its previous source.
+- Source activity starts with its first transfer and ends after its last active transfer finishes; completing one file no longer clears activity while another file from that source is still transferring.
+- Sources and Changes use a full-width horizontal refresh bar. Each refresh randomly selects one blue, teal or purple color and keeps it consistent across both screens for that refresh.
+- Sources retains its pull-to-refresh gesture while immediately ending the transparent pull control, leaving the horizontal bar as the single refresh indicator.
+
+The package version is `1.1.29` and the architecture is `iphoneos-arm64`. Build and offline regression checks do not replace repository refresh validation on a rootless device.
+
 # Cydia 1.1.28
 
 Repository refresh, account recovery and cached-package reliability fixes by BarabaDev on **9 September 2026**.

@@ -1,10 +1,11 @@
-/* Cydia 1.1.28 - modern rootless appearance layer for iOS 15+ */
+/* Cydia 1.1.29 - modern rootless appearance layer for iOS 15+ */
 
 #include "CyteKit/UCPlatform.h"
 #include "CyteKit/ModernAppearance.h"
 #include "Cydia/ModernLocalization.h"
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
+#include <stdlib.h>
 
 @implementation UIImage (CydiaModernSymbols)
 + (UIImage *) cy_symbolNamed:(NSString *)name {
@@ -83,6 +84,20 @@
 }
 @end
 
+static uint32_t CYSourceRefreshPaletteIndex_ = 0;
+
+void CYBeginSourceRefreshAppearance(void) {
+    CYSourceRefreshPaletteIndex_ = arc4random_uniform(3);
+}
+
+static UIColor *CYSourceRefreshColor(void) {
+    switch (CYSourceRefreshPaletteIndex_) {
+        case 1: return [UIColor systemTealColor];
+        case 2: return [UIColor systemPurpleColor];
+        default: return CYModernAccentColor();
+    }
+}
+
 @implementation CydiaSourceRefreshBar
 - (id) initWithFrame:(CGRect)frame {
     if ((self = [super initWithFrame:frame]) != nil) {
@@ -116,9 +131,10 @@
     [self stopMotion];
     if (!refreshing_ || [self window] == nil)
         return;
-    // Original Cydia uses the platform's blue tint. Vary intensity only.
-    UIColor *blue([CYModernAccentColor() resolvedColorWithTraitCollection:self.traitCollection]);
-    NSArray *palette(@[blue, [blue colorWithAlphaComponent:0.75], blue]);
+    // Keep the chosen tint for this whole refresh, including tab switches,
+    // appearance changes and returning from the background.
+    UIColor *refreshColor([CYSourceRefreshColor() resolvedColorWithTraitCollection:self.traitCollection]);
+    NSArray *palette(@[refreshColor, [refreshColor colorWithAlphaComponent:0.75], refreshColor]);
     NSMutableArray *frames([NSMutableArray array]);
     for (NSUInteger index = 0; index < [palette count]; ++index) {
         UIColor *color([palette objectAtIndex:index]);

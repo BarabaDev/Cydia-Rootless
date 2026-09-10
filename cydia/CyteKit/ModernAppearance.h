@@ -1,4 +1,4 @@
-/* Cydia 1.1.28 Rootless - iOS 15+ appearance helpers */
+/* Cydia 1.1.29 Rootless - iOS 15+ appearance helpers */
 
 #ifndef CyteKit_ModernAppearance_H
 #define CyteKit_ModernAppearance_H
@@ -31,6 +31,9 @@
 }
 - (void) setRefreshing:(BOOL)refreshing;
 @end
+
+// Select once on the main thread so Sources and Changes share one refresh tint.
+void CYBeginSourceRefreshAppearance(void);
 
 // A stable navigation hit area whose symbol and activity indicator share a centre.
 @interface CydiaNavigationButton : UIControl {

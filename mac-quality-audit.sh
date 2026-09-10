@@ -6,7 +6,7 @@ source_root="$project_root/cydia"
 sdk_path="$(xcrun --sdk iphoneos --show-sdk-path)"
 target="arm64-apple-ios15.0"
 
-printf '%s\n' '== Cydia 1.1.28 Mac quality audit =='
+printf '%s\n' '== Cydia 1.1.29 Mac quality audit =='
 
 (
     cd "$source_root"

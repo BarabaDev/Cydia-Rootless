@@ -5,15 +5,15 @@ cd "$(dirname "$0")"
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 ok() { printf 'OK: %s\n' "$*"; }
 
-expected="1.1.28"
+expected="1.1.29"
 pinned="e4718f05d049c1a09fb9662cc3db2d4c5122defe"
 
-echo "== Cydia 1.1.28 clean rootless source audit =="
+echo "== Cydia 1.1.29 clean rootless source audit =="
 
 [[ "$(./version.sh)" == "$expected" ]] || fail "package version is not $expected"
 grep -Fxq "#define CYDIA_VERSION \"$expected\"" Version.h || fail "compiled version header differs"
-grep -A1 '<key>CFBundleShortVersionString</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.28</string>' || fail "app public version is not 1.1.28"
-grep -A1 '<key>CFBundleVersion</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.28</string>' || fail "app build number is not the final release version 1.1.28"
+grep -A1 '<key>CFBundleShortVersionString</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.29</string>' || fail "app public version is not 1.1.29"
+grep -A1 '<key>CFBundleVersion</key>' MobileCydia.app/Info.plist | grep -Fq '<string>1.1.29</string>' || fail "app build number is not the final release version 1.1.29"
 ! grep -E '^Depends:.*cydia-lproj' cydia.control >/dev/null || fail "obsolete separate translation dependency remains"
 grep -Fq 'Replaces: cydia-lproj (<= 1.1.22)' cydia.control || fail "safe merged-translation replacement rule is missing"
 grep -Fq 'Conflicts: cydia-lproj (<= 1.1.22)' cydia.control || fail "old translation package is not removed during migration"
@@ -132,8 +132,8 @@ ok "minimal pinned Bingner APT inputs are complete"
 # transport contract must already exist in the compiled http.cc itself.  Audit
 # the implementation rather than trusting a diagnostic string in the app.
 http_method="apt64/methods/http.cc"
-[[ "$(grep -Fc 'CFSTR("Cydia/1.1.28")' "$http_method")" -eq 1 ]] || \
-    fail "embedded HTTPS method does not contain exactly one Cydia/1.1.28 User-Agent"
+[[ "$(grep -Fc 'CFSTR("Cydia/1.1.29")' "$http_method")" -eq 1 ]] || \
+    fail "embedded HTTPS method does not contain exactly one Cydia/1.1.29 User-Agent"
 ! grep -Fq 'Telesphoreo APT-HTTP/1.0.592' "$http_method" || \
     fail "obsolete Telesphoreo package User-Agent remains in compiled source"
 for header in \
@@ -381,7 +381,7 @@ grep -Fq '[heroTitle setText:CYLocalize(@"Welcome to Cydia™")]' Cydia/ModernNa
 grep -Fq 'by Jay Freeman (saurik)' Cydia/ModernNativeViews.mm || fail "original author attribution is missing"
 ! grep -Fq 'heroSubtitle' Cydia/ModernNativeViews.mm || fail "removed Modern Rootless hero label remains"
 ! grep -Fq 'heroDetail' Cydia/ModernNativeViews.mm || fail "removed upper version label remains"
-grep -Fq '[footer setText:@"Cydia 1.1.28"]' Cydia/ModernNativeViews.mm || fail "Home footer version is missing"
+grep -Fq '[footer setText:@"Cydia 1.1.29"]' Cydia/ModernNativeViews.mm || fail "Home footer version is missing"
 ! grep -Fq 'Rootless edition by BarabaDev' Cydia/ModernNativeViews.mm || fail "removed footer credit remains"
 grep -Fq 'CYM3DestinationButton(@"Cydia", @"f"' Cydia/ModernNativeViews.mm || fail "Facebook destination is missing"
 grep -Fq 'CYM3DestinationButton(@"saurik", @"𝕏"' Cydia/ModernNativeViews.mm || fail "saurik social destination is missing"
@@ -503,7 +503,7 @@ cmp -s apt64/COPYING.GPL MobileCydia.app/Licenses/GPL-2.0.txt || fail "APT GPL t
 grep -Fq 'GNU AFFERO GENERAL PUBLIC LICENSE' MobileCydia.app/Licenses/AGPL-3.0.txt || fail "Cytore AGPL text is missing"
 grep -Fq 'Nicolai M. Josuttis 2001' MobileCydia.app/Licenses/NOTICES.txt || fail "Component attribution notices are missing"
 ! grep -Fq 'legalRevealTimer_' Cydia/ModernNativeViews.mm || fail "About still delays license visibility"
-grep -Fq 'legalCopy_ = [@"Modern Rootless • BarabaDev • 9 September 2026' Cydia/ModernNativeViews.mm || fail "About license card does not identify the modified release"
+grep -Fq 'legalCopy_ = [@"Modern Rootless • BarabaDev • 10 September 2026' Cydia/ModernNativeViews.mm || fail "About license card does not identify the modified release"
 ! grep -Fq 'legalCopy_ = [@"Cydia by Jay Freeman' Cydia/ModernNativeViews.mm || fail "About license animation duplicates the original Cydia attribution"
 grep -Fq 'NSLinkAttributeName' Cydia/ModernNativeViews.mm || fail "About source address is not an interactive link"
 grep -Fq 'https://github.com/BarabaDev/Cydia-Rootless' Cydia/ModernNativeViews.mm || fail "About source link has no safe HTTPS destination"

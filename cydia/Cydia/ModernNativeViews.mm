@@ -1,4 +1,4 @@
-/* Cydia 1.1.28 Rootless - complete native iOS 15+ transaction UI */
+/* Cydia 1.1.29 Rootless - complete native iOS 15+ transaction UI */
 
 #include "Cydia/ModernLocalization.h"
 #include "Cydia/ModernNativeViews.h"
@@ -532,7 +532,7 @@ static NSAttributedString *CYM3LegalText(NSString *visible) {
     [credits setAxis:UILayoutConstraintAxisVertical];
     [credits setSpacing:9.0f];
 
-    legalCopy_ = [@"Modern Rootless • BarabaDev • 9 September 2026\n\nUnofficial modified edition.\nGNU GPL v3 or later; Cytore: GNU AGPL v3 or later. Component notices included.\nSource: github.com/BarabaDev/Cydia-Rootless" copy];
+    legalCopy_ = [@"Modern Rootless • BarabaDev • 10 September 2026\n\nUnofficial modified edition.\nGNU GPL v3 or later; Cytore: GNU AGPL v3 or later. Component notices included.\nSource: github.com/BarabaDev/Cydia-Rootless" copy];
 
     UIView *legalIconTile([[[UIView alloc] init] autorelease]);
     [legalIconTile setTranslatesAutoresizingMaskIntoConstraints:NO];
@@ -1636,7 +1636,7 @@ static NSMutableAttributedString *CYM3PresentationText(void) {
         [featuredScroll_ addSubview:featuredStack_];
 
         UILabel *footer(CYM3Label(UIFontTextStyleFootnote, [UIColor secondaryLabelColor], 1));
-        [footer setText:@"Cydia 1.1.28"];
+        [footer setText:@"Cydia 1.1.29"];
         homeVersion_ = footer;
         [footer setTextAlignment:NSTextAlignmentCenter];
 

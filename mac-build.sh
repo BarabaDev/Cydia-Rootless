@@ -24,7 +24,7 @@ gnutls_prefix="$(brew --prefix gnutls)"
     exit 11
 }
 
-log="${TMPDIR:-/tmp}/Cydia_1.1.28_mac-build.log"
+log="${TMPDIR:-/tmp}/Cydia_1.1.29_mac-build.log"
 : > "$log"
 
 cleanup_build_products() {
@@ -36,7 +36,7 @@ trap cleanup_build_products EXIT
 set +e
 {
     set -e
-    printf '%s\n' '== Cydia 1.1.28 rootless Mac build =='
+    printf '%s\n' '== Cydia 1.1.29 rootless Mac build =='
     printf 'SDK: %s\nJobs: %s\n\n' "$sdk_path" "$jobs"
 
     cd "$source_root"

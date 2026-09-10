@@ -1290,7 +1290,7 @@ static NSString *CYExternalSourceFromCydiaURL(NSURL *url) {
 @class CYPackageController;
 
 @protocol SourceDelegate
-- (void) setFetch:(NSNumber *)fetch;
+- (void) setSourceFetch:(NSArray *)state;
 @end
 
 @protocol FetchDelegate
@@ -1595,8 +1595,19 @@ class SourceStatus :
         //printf("Set(%s, %s)\n", fetch ? "true" : "false", uri.c_str());
 
         auto slash(uri.rfind('/'));
-        if (slash != std::string::npos)
-            [database_ setFetch:fetch forURI:uri.substr(0, slash).c_str()];
+        if (slash == std::string::npos)
+            return;
+        const std::string directory(uri.substr(0, slash));
+        // Several index transfers can share one directory. Publish only its
+        // first start and last finish, so completing one file cannot hide the
+        // source's indicator while another transfer is still active.
+        for (const std::string &active : fetches_) {
+            auto activeSlash(active.rfind('/'));
+            if (active != uri && activeSlash != std::string::npos &&
+                active.substr(0, activeSlash) == directory)
+                return;
+        }
+        [database_ setFetch:fetch forURI:directory.c_str()];
     }
 
     _finline void Set(bool fetch, pkgAcquire::Item *item) {
@@ -2108,11 +2119,16 @@ static NSString *CYRememberedSourceDisplayName(NSString *key) {
         std::string file(dindex->MetaIndexURI(""));
         base_.set(pool, file);
 
+        // All Source models share this acquire queue. GetIndexes appends this
+        // repository's items; earlier items belong to other repositories.
+        // Keep an offset rather than an iterator, since appending can move the
+        // underlying vector. Only this source's targets may drive its row.
+        size_t firstSourceItem(acquire->ItemsEnd() - acquire->ItemsBegin());
         _profile(Source$setMetaIndex$GetIndexes)
         dindex->GetIndexes(acquire, true);
         _end
         _profile(Source$setMetaIndex$DescURI)
-        for (pkgAcquire::ItemIterator item(acquire->ItemsBegin()); item != acquire->ItemsEnd(); item++) {
+        for (pkgAcquire::ItemIterator item(acquire->ItemsBegin() + firstSourceItem); item != acquire->ItemsEnd(); item++) {
             std::string file((*item)->DescURI());
             auto slash(file.rfind('/'));
             if (slash == std::string::npos)
@@ -2425,12 +2441,14 @@ static NSString *CYRememberedSourceDisplayName(NSString *key) {
     else if (!fetches_.insert(uri).second)
         return;
 
-    [delegate_ performSelectorOnMainThread:@selector(setFetch:) withObject:[NSNumber numberWithBool:[self fetch]] waitUntilDone:NO];
+    [delegate_ performSelectorOnMainThread:@selector(setSourceFetch:)
+        withObject:@[self, @([self fetch])] waitUntilDone:NO];
 }
 
 - (void) resetFetch {
     fetches_.clear();
-    [delegate_ performSelectorOnMainThread:@selector(setFetch:) withObject:[NSNumber numberWithBool:NO] waitUntilDone:NO];
+    [delegate_ performSelectorOnMainThread:@selector(setSourceFetch:)
+        withObject:@[self, @NO] waitUntilDone:NO];
 }
 
 @end
@@ -10551,6 +10569,7 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
 - (void) beginUpdateForSourceKey:(NSString *)sourceKey {
     if (updating_)
         return;
+    CYBeginSourceRefreshAppearance();
     updatingSourceKey_ = sourceKey == nil ? nil : [NSString stringWithString:sourceKey];
     ++sourceRefreshGeneration_;
 
@@ -11165,8 +11184,8 @@ static void CYReplaceFeaturedProcessBannerRecords(NSArray *records) {
     [view addSubview:refreshBar_];
     [NSLayoutConstraint activateConstraints:@[
         [[refreshBar_ topAnchor] constraintEqualToAnchor:[[view safeAreaLayoutGuide] topAnchor] constant:2.0f],
-        [[refreshBar_ leadingAnchor] constraintEqualToAnchor:[view leadingAnchor] constant:16.0f],
-        [[refreshBar_ trailingAnchor] constraintEqualToAnchor:[view trailingAnchor] constant:-16.0f],
+        [[refreshBar_ leadingAnchor] constraintEqualToAnchor:[view leadingAnchor]],
+        [[refreshBar_ trailingAnchor] constraintEqualToAnchor:[view trailingAnchor]],
         [[refreshBar_ heightAnchor] constraintEqualToConstant:3.0f],
     ]];
     [refreshBar_ setRefreshing:[self.delegate updating]];
@@ -12337,6 +12356,14 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
     [self setRefreshing:[fetch boolValue]];
 }
 
+- (void) setSourceFetch:(NSArray *)state {
+    // Delivery may follow row reuse or a database-model replacement. A stale
+    // source must not change the indicator of the source now shown here.
+    if ([state objectAtIndex:0] != (id) source_)
+        return;
+    [self setFetch:[state objectAtIndex:1]];
+}
+
 @end
 /* }}} */
 /* Sources Controller {{{ */
@@ -12736,7 +12763,7 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
     [(UITableView *) list_ setDataSource:self];
     [list_ setDelegate:self];
     refresh_ = [[[UIRefreshControl alloc] init] autorelease];
-    [refresh_ setTintColor:CYModernAccentColor()];
+    [refresh_ setTintColor:[UIColor clearColor]];
     [refresh_ addTarget:self action:@selector(pullToRefresh) forControlEvents:UIControlEventValueChanged];
     [list_ setRefreshControl:refresh_];
 
@@ -12746,8 +12773,8 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
     [list_ addSubview:refreshBar_];
     [NSLayoutConstraint activateConstraints:[NSArray arrayWithObjects:
         [[refreshBar_ topAnchor] constraintEqualToAnchor:[[list_ safeAreaLayoutGuide] topAnchor] constant:2.0f],
-        [[refreshBar_ leadingAnchor] constraintEqualToAnchor:[[list_ frameLayoutGuide] leadingAnchor] constant:16.0f],
-        [[refreshBar_ trailingAnchor] constraintEqualToAnchor:[[list_ frameLayoutGuide] trailingAnchor] constant:-16.0f],
+        [[refreshBar_ leadingAnchor] constraintEqualToAnchor:[[list_ frameLayoutGuide] leadingAnchor]],
+        [[refreshBar_ trailingAnchor] constraintEqualToAnchor:[[list_ frameLayoutGuide] trailingAnchor]],
         [[refreshBar_ heightAnchor] constraintEqualToConstant:3.0f],
     nil]];
 
@@ -12773,8 +12800,9 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
 }
 
 - (void) pullToRefresh {
-    if (![self.delegate requestUpdate])
-        [refresh_ endRefreshing];
+    // Pull remains a shortcut; the shared top bar owns refresh feedback.
+    [refresh_ endRefreshing];
+    [self.delegate requestUpdate];
 }
 
 - (void) viewDidLoad {
