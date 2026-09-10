@@ -1,12 +1,14 @@
-# Cydia 1.1.29 Rootless
+# Cydia 1.1.30 Rootless
 
 Cydia for rootless iOS 15 and later, based on the Cydia source supplied with this project. This unofficial edition was modified by BarabaDev on **10 September 2026**. It includes native package screens, repository accounts, adaptive layouts, dark appearance and 21 bundled localizations. It is not an official release or an endorsement by Jay Freeman (saurik), SaurikIT, LLC, or Sam Bingner.
 
-Version 1.1.29 corrects activity indicators during individual source refreshes. A shared acquisition queue had allowed later source rows to inherit earlier repositories' indicator URLs. Each source now receives only its own indicator URLs; the backend already targeted the selected repository.
+Version 1.1.30 expands the Sources and Changes refresh bars to 32 coordinated blue, teal, green, purple and pink shades. Each refresh selects one shared shade without immediately repeating the previous choice, and displays a subtle tonal gradient.
 
-Queued activity callbacks retain their source identity, preventing outdated callbacks from changing reused source rows. Sources and Changes show a full-width refresh bar with one blue, teal or purple color selected at the start of each refresh and shared by both screens. Pulling to refresh Sources uses this bar without displaying a second spinner.
+Sources and Changes keep their full-width refresh bar at the top of the content. Pulling to refresh Sources uses this bar without displaying a second spinner. Source activity remains tied to the corresponding repository.
 
 Sources support individual Refresh actions and removal of Cydia-managed entries. Package rows provide quick actions while retaining the normal review and account flow. Manage Account shows the repository sign-in state separately from purchase ownership.
+
+In Sources edit mode, only rows that Cydia can remove indent to make room for the minus control. Sources managed elsewhere stay at their normal position without an empty delete gutter, and retain their Refresh action.
 
 ## Build on macOS
 
@@ -21,7 +23,7 @@ JOBS=4 ./mac-build.sh
 The build audits the sources, compiles and signs the arm64 binaries, then creates and verifies:
 
 ```text
-cydia/debs/cydia_1.1.29_iphoneos-arm64.deb
+cydia/debs/cydia_1.1.30_iphoneos-arm64.deb
 ```
 
 Temporary objects and staging directories are removed after the build. Build logs are written to the system temporary directory. Nothing is installed or published automatically. Generated DEBs are ignored by Git; distribute them separately as release assets.
@@ -56,7 +58,7 @@ Repository compatibility currently permits unsigned, weakly signed and expired m
 
 ## Repository publishing
 
-Keep the metadata in `cydia/cydia.control` when generating the repository index. Upload the [repository icon](RepositoryAssets/README.md) so it is visible before installation. The version is **1.1.29**, so an installed 1.1.28 is eligible for a normal package update after the repository index is refreshed.
+Keep the metadata in `cydia/cydia.control` when generating the repository index. Upload the [repository icon](RepositoryAssets/README.md) so it is visible before installation. The version is **1.1.30**, so an installed 1.1.29 is eligible for a normal package update after the repository index is refreshed.
 
 Publish the complete corresponding source for this exact build alongside the DEB, including resources, pinned APT sources, build scripts and licenses. Keep an immutable release tag or source archive and provide a clear source download link wherever the DEB is offered. A link to upstream Cydia or a changing development branch does not identify this build's corresponding source. Keep the source available for as long as the binary is offered. The app's source link is `https://github.com/BarabaDev/Cydia-Rootless`; upload the matching source there before distributing the DEB.
 

@@ -231,17 +231,17 @@ else
     dpkg-deb -x Cydia.deb "$tmppayload"
 fi
 [[ -f "$packaged_plist" ]] || fail "packaged Cydia.app Info.plist is missing"
-grep -A1 '<key>CFBundleShortVersionString</key>' "$packaged_plist" | grep -Fq '<string>1.1.29</string>' || \
-    fail "packaged Cydia.app public version is not 1.1.29"
-grep -A1 '<key>CFBundleVersion</key>' "$packaged_plist" | grep -Fq '<string>1.1.29</string>' || \
-    fail "packaged Cydia.app does not select final bundle version 1.1.29"
+grep -A1 '<key>CFBundleShortVersionString</key>' "$packaged_plist" | grep -Fq '<string>1.1.30</string>' || \
+    fail "packaged Cydia.app public version is not 1.1.30"
+grep -A1 '<key>CFBundleVersion</key>' "$packaged_plist" | grep -Fq '<string>1.1.30</string>' || \
+    fail "packaged Cydia.app does not select final bundle version 1.1.30"
 ! grep -Fq '<key>UIUserInterfaceStyle</key>' "$packaged_plist" || \
     fail "packaged Cydia.app still forces a fixed interface style"
 grep -A1 '<key>UILaunchStoryboardName</key>' "$packaged_plist" | grep -Fq '<string>LaunchScreen</string>' || \
     fail "packaged Cydia.app does not select the adaptive native launch screen"
 ! grep -Fq '<key>UILaunchImages</key>' "$packaged_plist" || \
     fail "packaged Cydia.app still selects legacy fixed-size launch images"
-echo "[ok] packaged Cydia.app is public version 1.1.29, final bundle version 1.1.29, with automatic Light/Dark appearance"
+echo "[ok] packaged Cydia.app is public version 1.1.30, final bundle version 1.1.30, with automatic Light/Dark appearance"
 
 if ! grep -Eq '^-rwsr-sr-x .* \./var/jb/usr/libexec/cydia/cydo$' <<<"$contents"; then
     echo "$contents" | grep '/var/jb/usr/libexec/cydia/cydo$' || true

@@ -1,4 +1,4 @@
-/* Cydia 1.1.29 - modern rootless appearance layer for iOS 15+ */
+/* Cydia 1.1.30 - modern rootless appearance layer for iOS 15+ */
 
 #include "CyteKit/UCPlatform.h"
 #include "CyteKit/ModernAppearance.h"
@@ -84,18 +84,38 @@
 }
 @end
 
+// Refresh colors stay separate from the red/orange warning and error states.
+static const CGFloat CYSourceRefreshHues_[] = {
+    210, 216, 222, 228, 234, 240, 246, 252,
+    258, 264, 270, 276, 282, 288, 294, 300,
+    306, 312, 318, 132, 138, 144, 150, 156,
+    162, 168, 174, 180, 186, 192, 198, 204
+};
 static uint32_t CYSourceRefreshPaletteIndex_ = 0;
+static BOOL CYSourceRefreshPaletteSelected_ = NO;
 
 void CYBeginSourceRefreshAppearance(void) {
-    CYSourceRefreshPaletteIndex_ = arc4random_uniform(3);
+    const uint32_t count(sizeof(CYSourceRefreshHues_) / sizeof(CYSourceRefreshHues_[0]));
+    // Choose uniformly from every other entry without a retry loop. The first
+    // refresh can choose any shade, including the initial default blue.
+    CYSourceRefreshPaletteIndex_ = CYSourceRefreshPaletteSelected_ ?
+        (CYSourceRefreshPaletteIndex_ + 1 + arc4random_uniform(count - 1)) % count :
+        arc4random_uniform(count);
+    CYSourceRefreshPaletteSelected_ = YES;
 }
 
 static UIColor *CYSourceRefreshColor(void) {
-    switch (CYSourceRefreshPaletteIndex_) {
-        case 1: return [UIColor systemTealColor];
-        case 2: return [UIColor systemPurpleColor];
-        default: return CYModernAccentColor();
-    }
+    const CGFloat hue(CYSourceRefreshHues_[CYSourceRefreshPaletteIndex_]);
+    // Capture this refresh's hue. Resolving Light/Dark or increased contrast
+    // must not select another color or change the other tab's refresh state.
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *traits) {
+        BOOL dark([traits userInterfaceStyle] == UIUserInterfaceStyleDark);
+        BOOL contrast([traits accessibilityContrast] == UIAccessibilityContrastHigh);
+        CGFloat saturation(dark ? (contrast ? 0.38f : 0.45f) : 0.78f);
+        CGFloat brightness(dark ? 0.96f : (hue < 186 ? 0.56f : (hue < 198 ? 0.60f : (hue < 210 ? 0.66f : 0.82f))));
+        if (contrast && !dark) brightness -= 0.10f;
+        return [UIColor colorWithHue:hue / 360.0f saturation:saturation brightness:brightness alpha:1.0f];
+    }];
 }
 
 @implementation CydiaSourceRefreshBar
@@ -134,14 +154,14 @@ static UIColor *CYSourceRefreshColor(void) {
     // Keep the chosen tint for this whole refresh, including tab switches,
     // appearance changes and returning from the background.
     UIColor *refreshColor([CYSourceRefreshColor() resolvedColorWithTraitCollection:self.traitCollection]);
-    NSArray *palette(@[refreshColor, [refreshColor colorWithAlphaComponent:0.75], refreshColor]);
-    NSMutableArray *frames([NSMutableArray array]);
-    for (NSUInteger index = 0; index < [palette count]; ++index) {
-        UIColor *color([palette objectAtIndex:index]);
-        [frames addObject:@[(id)[[color colorWithAlphaComponent:0.28] CGColor],
-            (id)[color CGColor], (id)[[color colorWithAlphaComponent:0.5] CGColor]]];
-    }
-    [frames addObject:[frames firstObject]];
+    BOOL contrast([self.traitCollection accessibilityContrast] == UIAccessibilityContrastHigh);
+    NSArray *bright(@[(id)[[refreshColor colorWithAlphaComponent:contrast ? 0.72f : 0.40f] CGColor],
+        (id)[refreshColor CGColor],
+        (id)[[refreshColor colorWithAlphaComponent:contrast ? 0.82f : 0.56f] CGColor]]);
+    NSArray *soft(@[(id)[[refreshColor colorWithAlphaComponent:contrast ? 0.80f : 0.48f] CGColor],
+        (id)[[refreshColor colorWithAlphaComponent:contrast ? 1.0f : 0.90f] CGColor],
+        (id)[[refreshColor colorWithAlphaComponent:contrast ? 0.88f : 0.64f] CGColor]]);
+    NSArray *frames(@[bright, soft, bright]);
     [CATransaction begin]; [CATransaction setDisableActions:YES];
     [spectrum_ setColors:[frames firstObject]];
     [CATransaction commit];

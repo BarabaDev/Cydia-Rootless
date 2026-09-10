@@ -12547,6 +12547,11 @@ static bool CYSetPackageSelection(NSString *name, bool hold) {
         ![self.delegate updating] ? UITableViewCellEditingStyleDelete : UITableViewCellEditingStyleNone;
 }
 
+- (BOOL) tableView:(UITableView *)tableView shouldIndentWhileEditingRowAtIndexPath:(NSIndexPath *)indexPath {
+    // Keep refresh-only sources aligned; only a visible delete control needs a gutter.
+    return [self tableView:tableView editingStyleForRowAtIndexPath:indexPath] == UITableViewCellEditingStyleDelete;
+}
+
 - (BOOL) removeSourceWithKey:(NSString *)key expectedRecord:(NSDictionary *)record {
     if ([key length] == 0 || record == nil || [self.delegate updating])
         return NO;

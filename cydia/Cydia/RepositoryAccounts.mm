@@ -1,4 +1,4 @@
-/* Cydia 1.1.29 Rootless - repository accounts compatible with Sileo's API. */
+/* Cydia 1.1.30 Rootless - repository accounts compatible with Sileo's API. */
 
 #include "Cydia/ModernLocalization.h"
 #include "Cydia/RepositoryAccounts.h"
@@ -100,7 +100,7 @@ static NSData *CYRepositoryRequest(NSURL *url, NSString *method, NSDictionary *b
 
     NSMutableURLRequest *request([NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:20.0]);
     [request setHTTPMethod:method ?: @"GET"];
-    [request setValue:@"Cydia/1.1.29" forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"Cydia/1.1.30" forHTTPHeaderField:@"User-Agent"];
     [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
     if (body != nil) {
         NSError *jsonError(nil);

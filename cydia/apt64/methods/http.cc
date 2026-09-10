@@ -306,7 +306,7 @@ int HttpMethod::Loop()
       // product identity that was already verified on-device, and retain the
       // iOS client-hint contract required by repositories that gate downloads
       // using the same request shape as modern package managers.
-      CFHTTPMessageSetHeaderFieldValue(hm, CFSTR("User-Agent"), CFSTR("Cydia/1.1.29"));
+      CFHTTPMessageSetHeaderFieldValue(hm, CFSTR("User-Agent"), CFSTR("Cydia/1.1.30"));
       CFHTTPMessageSetHeaderFieldValue(hm, CFSTR("Sec-CH-UA"), CFSTR("\"Cydia\";v=\"1\""));
       CFHTTPMessageSetHeaderFieldValue(hm, CFSTR("Sec-CH-UA-Platform"), CFSTR("\"iOS\""));
       if (Firmware_ != NULL)

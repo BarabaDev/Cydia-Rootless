@@ -1,4 +1,4 @@
-/* Cydia 1.1.29 Rootless - iOS 15+ appearance helpers */
+/* Cydia 1.1.30 Rootless - iOS 15+ appearance helpers */
 
 #ifndef CyteKit_ModernAppearance_H
 #define CyteKit_ModernAppearance_H

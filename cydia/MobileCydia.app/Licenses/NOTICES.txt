@@ -1,4 +1,4 @@
-Cydia 1.1.29 Rootless — component licenses and notices
+Cydia 1.1.30 Rootless — component licenses and notices
 
 This is an unofficial edition modified by BarabaDev on 10 September 2026.
 Original Cydia: Jay Freeman (saurik), SaurikIT, LLC.

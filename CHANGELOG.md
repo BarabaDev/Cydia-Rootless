@@ -1,3 +1,14 @@
+# Cydia 1.1.30
+
+Refresh-bar palette and Sources editing update by BarabaDev on **10 September 2026**.
+
+- Expanded the refresh-bar palette to 32 coordinated blue, teal, green, purple and pink shades.
+- Sources and Changes use one synchronized color choice for each refresh. Consecutive refreshes avoid immediately repeating the previous shade.
+- A subtle tonal gradient adds depth to the selected color. The full-width bars stay at the top of Sources and Changes; refresh behavior and source activity attribution are unchanged.
+- Sources edit mode indents only rows that Cydia can remove to make room for the minus control. Sources managed elsewhere remain at their normal position without an empty delete gutter; ownership rules and Refresh actions are preserved.
+
+The package version is `1.1.30` and the architecture is `iphoneos-arm64`. Interface and build checks do not replace validation on a rootless device.
+
 # Cydia 1.1.29
 
 Per-source refresh activity and presentation update by BarabaDev on **10 September 2026**.
